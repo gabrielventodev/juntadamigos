@@ -1,8 +1,8 @@
 pluginManagement {
     repositories {
+        google()
         gradlePluginPortal()
         mavenCentral()
-        google()
     }
 }
 
@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "juntadamigos"
 include(":core")
+include(":app")

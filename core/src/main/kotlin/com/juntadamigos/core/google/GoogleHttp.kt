@@ -38,6 +38,25 @@ internal suspend fun OkHttpClient.postGoogle(
     }
 }
 
+/** GET a una API de Google Maps Platform con key y field mask en headers (Places New, Place Details). */
+internal suspend fun OkHttpClient.getGoogle(
+    url: String,
+    apiKey: String,
+    fieldMask: String,
+): String = withContext(Dispatchers.IO) {
+    val request = Request.Builder()
+        .url(url)
+        .header("X-Goog-Api-Key", apiKey)
+        .header("X-Goog-FieldMask", fieldMask)
+        .get()
+        .build()
+    newCall(request).execute().use { response ->
+        val text = response.body?.string().orEmpty()
+        if (!response.isSuccessful) throw GoogleApiException(response.code, "HTTP ${response.code}: $text")
+        text
+    }
+}
+
 internal suspend fun OkHttpClient.getText(url: String): String = withContext(Dispatchers.IO) {
     newCall(Request.Builder().url(url).get().build()).execute().use { response ->
         val text = response.body?.string().orEmpty()

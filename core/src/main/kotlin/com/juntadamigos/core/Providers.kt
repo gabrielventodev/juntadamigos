@@ -28,3 +28,27 @@ interface TravelTimeMatrix {
 interface Geocoder {
     suspend fun geocode(address: String): LatLng?
 }
+
+/** Una sugerencia de autocompletado de dirección o lugar. */
+data class AddressSuggestion(
+    val placeId: String,
+    val primaryText: String,
+    val secondaryText: String? = null,
+)
+
+/** Una dirección elegida, ya con coordenadas. */
+data class ResolvedAddress(
+    val placeId: String,
+    val address: String,
+    val location: LatLng,
+)
+
+/**
+ * Autocompletado de direcciones en dos pasos: [suggest] mientras se escribe y [resolve]
+ * al elegir. Ambos usan el mismo [sessionToken] para que Google cobre una sola sesión.
+ * Después de [resolve], generar un token nuevo.
+ */
+interface AddressAutocomplete {
+    suspend fun suggest(input: String, sessionToken: String, bias: LatLng? = null): List<AddressSuggestion>
+    suspend fun resolve(placeId: String, sessionToken: String): ResolvedAddress?
+}

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tres puntos que convergen en un pin central. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:pathData="M54,36c-6.6,0 -12,5.4 -12,12c0,9 12,22 12,22s12,-13 12,-22c0,-6.6 -5.4,-12 -12,-12zM54,52.5c-2.5,0 -4.5,-2 -4.5,-4.5s2,-4.5 4.5,-4.5s4.5,2 4.5,4.5s-2,4.5 -4.5,4.5z" />
+    <path android:fillColor="#C8E6C9" android:pathData="M33,72m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#C8E6C9" android:pathData="M75,72m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path android:fillColor="#C8E6C9" android:pathData="M54,80m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>
