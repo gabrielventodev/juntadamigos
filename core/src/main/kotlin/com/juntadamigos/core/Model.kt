@@ -51,6 +51,8 @@ data class Suggestion(
     val place: Place,
     /** Tiempo de viaje por id de participante. */
     val travelTimes: Map<String, Duration>,
+    /** Puntaje usado para ordenar: tiempo total ponderado por modo. Menor es mejor. */
+    val score: Duration = travelTimes.values.fold(Duration.ZERO) { acc, d -> acc + d },
 ) {
     val totalTravelTime: Duration = travelTimes.values.fold(Duration.ZERO) { acc, d -> acc + d }
     val maxTravelTime: Duration = travelTimes.values.maxOrNull() ?: Duration.ZERO
@@ -58,12 +60,10 @@ data class Suggestion(
 
 /** Resultado de una búsqueda de punto de encuentro. */
 data class MeetingResult(
-    /** Mejores lugares, ordenados por menor tiempo total. */
+    /** Mejores lugares, ordenados por menor tiempo total ponderado por modo. */
     val suggestions: List<Suggestion>,
-    /** Centro geográfico usado para buscar candidatos. */
-    val searchCenter: LatLng,
-    /** Radio de búsqueda usado, en metros. */
-    val searchRadiusMeters: Double,
+    /** Zonas donde se buscaron candidatos (las de menor tiempo total muestreado). */
+    val searchAreas: List<SearchArea>,
     /** Cuántos candidatos se evaluaron. */
     val candidatesEvaluated: Int,
     /** Candidatos descartados porque alguien no tenía ruta (p. ej., sin transporte público). */
@@ -71,3 +71,6 @@ data class MeetingResult(
     /** Candidatos descartados por superar el tope de viaje individual. */
     val discardedOverCap: Int,
 )
+
+/** Círculo donde se buscaron lugares. */
+data class SearchArea(val center: LatLng, val radiusMeters: Double)

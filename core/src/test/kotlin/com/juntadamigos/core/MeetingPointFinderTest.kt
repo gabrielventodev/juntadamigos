@@ -15,6 +15,15 @@ private class FakePlaces(private val places: List<Place>) : PlaceSearch {
         places.take(maxResults)
 }
 
+/** Lugares fijos, devuelve solo los que caen dentro del círculo pedido. Registra las búsquedas. */
+private class CirclePlaces(private val places: List<Place>) : PlaceSearch {
+    val searches = mutableListOf<SearchArea>()
+    override suspend fun searchNearby(center: LatLng, radiusMeters: Double, category: PlaceCategory, maxResults: Int): List<Place> {
+        searches += SearchArea(center, radiusMeters)
+        return places.filter { Geo.distanceMeters(center, it.location) <= radiusMeters }.take(maxResults)
+    }
+}
+
 /** Tiempo = distancia en línea recta / velocidad del modo. Cuenta llamadas y elementos. */
 private class FakeMatrix(
     private val speedsMps: Map<TravelMode, Double> = mapOf(
@@ -111,7 +120,7 @@ class MeetingPointFinderTest {
         val friends = (0 until 7).map { Participant("p$it", "P$it", at(it * 0.01), TravelMode.TRANSIT) }
         val places = (0 until 15).map { place("l$it", it * 0.005) }
         val matrix = FakeMatrix()
-        val config = MeetingPointFinder.Config(maxCandidates = 15, maxMatrixElements = 20)
+        val config = MeetingPointFinder.Config(maxCandidates = 15, searchAreas = 1, maxMatrixElements = 20)
         val result = MeetingPointFinder(FakePlaces(places), matrix, config).find(friends, PlaceCategory.CAFE, topN = 15)
 
         assertTrue(matrix.maxElementsSeen <= 20, "lote de ${matrix.maxElementsSeen} elementos")
@@ -129,7 +138,8 @@ class MeetingPointFinderTest {
         )
         val matrix = FakeMatrix()
         MeetingPointFinder(FakePlaces(listOf(place("x", 0.02))), matrix).find(friends, PlaceCategory.CAFE)
-        assertEquals(2, matrix.calls)
+        // 2 modos × (muestreo de zonas + candidatos).
+        assertEquals(4, matrix.calls)
     }
 
     @Test
@@ -165,5 +175,50 @@ class MeetingPointFinderTest {
         val lejos = listOf(Participant("a", "A", at(0.0), TravelMode.DRIVE), Participant("b", "B", at(5.0), TravelMode.DRIVE))
         assertEquals(1_000.0, finder.searchRadius(Geo.centroid(cerca.map { it.location }), cerca))
         assertEquals(50_000.0, finder.searchRadius(Geo.centroid(lejos.map { it.location }), lejos))
+    }
+
+    @Test
+    fun `busca lugares cerca de quien va a pie aunque esten lejos del centro`() = runTest {
+        // Caso reportado: dos personas lejos, una en auto y otra a pie. El viejo algoritmo
+        // solo buscaba alrededor del centro y nunca veía el café al lado del que camina.
+        val friends = listOf(
+            Participant("auto", "Con auto", at(0.00), TravelMode.DRIVE),
+            Participant("pie", "A pie", at(0.10), TravelMode.WALK),
+        )
+        val places = listOf(place("centro", 0.05), place("cerca-auto", 0.005), place("cerca-pie", 0.098))
+        val search = CirclePlaces(places)
+        val result = MeetingPointFinder(search, FakeMatrix()).find(friends, PlaceCategory.CAFE)
+
+        val best = result.suggestions.first()
+        assertEquals("cerca-pie", best.place.id)
+        assertTrue(best.travelTimes.getValue("pie") < best.travelTimes.getValue("auto"))
+        assertTrue(search.searches.none { Geo.distanceMeters(it.center, at(0.05)) < 100 }, "no debería buscar en el centro")
+    }
+
+    @Test
+    fun `con tope prefiere zonas que lo cumplen`() = runTest {
+        val friends = listOf(
+            Participant("auto", "Con auto", at(0.00), TravelMode.DRIVE),
+            Participant("pie", "A pie", at(0.10), TravelMode.WALK),
+        )
+        val places = listOf(place("centro", 0.05), place("cerca-pie", 0.098), place("lado-pie", 0.08))
+        val result = MeetingPointFinder(CirclePlaces(places), FakeMatrix())
+            .find(friends, PlaceCategory.CAFE, maxIndividualTravel = 40.minutes)
+        assertTrue(result.suggestions.isNotEmpty())
+        assertTrue(result.suggestions.all { it.maxTravelTime <= 40.minutes })
+    }
+
+    @Test
+    fun `los puntos de muestra incluyen el centro y la ubicacion de cada uno`() {
+        val friends = listOf(
+            Participant("a", "A", at(0.00), TravelMode.DRIVE),
+            Participant("b", "B", at(0.10), TravelMode.WALK),
+        )
+        val finder = MeetingPointFinder(FakePlaces(emptyList()), FakeMatrix())
+        val center = Geo.centroid(friends.map { it.location })
+        val samples = finder.samplePoints(center, friends)
+        assertEquals(1 + 2 * 4, samples.size)
+        assertEquals(center, samples.first())
+        friends.forEach { f -> assertTrue(samples.any { Geo.distanceMeters(it, f.location) < 1 }) }
     }
 }
