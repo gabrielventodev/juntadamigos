@@ -15,9 +15,10 @@ kotlin {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    // api: OkHttpClient y las corrutinas aparecen en la API pública de los clientes.
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    api("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
