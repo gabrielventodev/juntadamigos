@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FF2E7D32</color>
+    <!-- primary del diseño (tokens.json Juntadamigos). -->
+    <color name="ic_launcher_background">#FF0F6E58</color>
+    <!-- surface: fondo de ventana antes de que dibuje Compose (evita el flash blanco/negro). -->
+    <color name="window_background">#FFFBF8F2</color>
 </resources>
