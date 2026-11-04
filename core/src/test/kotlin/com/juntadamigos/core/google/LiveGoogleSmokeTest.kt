@@ -24,7 +24,7 @@ class LiveGoogleSmokeTest {
     }
 
     @Test
-    fun `geocoding real`() = runBlocking {
+    fun `geocoding real`(): Unit = runBlocking {
         requireLive()
         val loc = GoogleGeocoder(key!!, region = "ar").geocode("Av. Corrientes 1500, Buenos Aires")
         assertNotNull(loc)
@@ -32,7 +32,7 @@ class LiveGoogleSmokeTest {
     }
 
     @Test
-    fun `autocompletado y detalles reales`() = runBlocking {
+    fun `autocompletado y detalles reales`(): Unit = runBlocking {
         requireLive()
         val ac = GooglePlaceAutocomplete(key!!, regionCodes = listOf("ar"))
         val token = UUID.randomUUID().toString()
@@ -45,7 +45,7 @@ class LiveGoogleSmokeTest {
     }
 
     @Test
-    fun `punto de encuentro real con modos mezclados`() = runBlocking {
+    fun `punto de encuentro real con modos mezclados`(): Unit = runBlocking {
         requireLive()
         val geocoder = GoogleGeocoder(key!!, region = "ar")
         val people = listOf(

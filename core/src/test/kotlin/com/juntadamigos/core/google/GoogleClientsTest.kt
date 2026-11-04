@@ -46,7 +46,9 @@ class GoogleClientsTest {
         assertEquals("KEY", req.getHeader("X-Goog-Api-Key"))
         assertEquals(GooglePlaceSearch.FIELD_MASK, req.getHeader("X-Goog-FieldMask"))
         val body = Json.parseToJsonElement(req.body.readUtf8()).jsonObject
-        assertEquals("cafe", body["includedTypes"]!!.jsonArray[0].jsonPrimitive.content)
+        // Café filtra por tipo principal; si no, Google mezcla McDonald's y estaciones de servicio.
+        assertEquals(listOf("cafe", "coffee_shop"), body["includedPrimaryTypes"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(null, body["includedTypes"])
         assertEquals(15, body["maxResultCount"]!!.jsonPrimitive.content.toInt())
     }
 
