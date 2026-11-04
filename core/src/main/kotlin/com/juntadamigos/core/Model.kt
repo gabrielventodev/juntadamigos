@@ -22,15 +22,19 @@ data class Participant(
 )
 
 /**
- * Tipo de lugar buscado. [googleType] es el tipo de la Places API (New):
+ * Tipo de lugar buscado, en tipos de la Places API (New):
  * https://developers.google.com/maps/documentation/places/web-service/place-types
+ *
+ * [primaryOnly] filtra por tipo principal. Hace falta en café y bar: con `includedTypes`
+ * Google devuelve McDonald's y estaciones YPF como "cafe" (validado contra la API real).
+ * En restaurante no: los tipos principales son específicos (parrilla, pizzería...).
  */
-enum class PlaceCategory(val googleType: String) {
-    CAFE("cafe"),
-    BAR("bar"),
-    RESTAURANT("restaurant"),
-    PARK("park"),
-    SHOPPING_MALL("shopping_mall"),
+enum class PlaceCategory(val googleTypes: List<String>, val primaryOnly: Boolean) {
+    CAFE(listOf("cafe", "coffee_shop"), primaryOnly = true),
+    BAR(listOf("bar", "pub", "brewpub", "wine_bar", "cocktail_bar", "bar_and_grill"), primaryOnly = true),
+    RESTAURANT(listOf("restaurant"), primaryOnly = false),
+    PARK(listOf("park"), primaryOnly = false),
+    SHOPPING_MALL(listOf("shopping_mall"), primaryOnly = false),
 }
 
 /** Un lugar real candidato a punto de encuentro. */

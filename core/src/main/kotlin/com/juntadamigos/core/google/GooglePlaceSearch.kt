@@ -26,7 +26,8 @@ class GooglePlaceSearch(
         maxResults: Int,
     ): List<Place> {
         val request = NearbyRequest(
-            includedTypes = listOf(category.googleType),
+            includedTypes = category.googleTypes.takeUnless { category.primaryOnly },
+            includedPrimaryTypes = category.googleTypes.takeIf { category.primaryOnly },
             maxResultCount = maxResults.coerceIn(1, 20),
             locationRestriction = LocationRestriction(
                 Circle(LatLngJson(center.latitude, center.longitude), radiusMeters.coerceIn(1.0, 50_000.0)),
@@ -61,7 +62,8 @@ class GooglePlaceSearch(
 
     @Serializable
     internal data class NearbyRequest(
-        val includedTypes: List<String>,
+        val includedTypes: List<String>? = null,
+        val includedPrimaryTypes: List<String>? = null,
         val maxResultCount: Int,
         val locationRestriction: LocationRestriction,
         val languageCode: String,
