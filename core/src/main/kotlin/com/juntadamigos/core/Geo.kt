@@ -41,4 +41,16 @@ object Geo {
         val lat = atan2(z, sqrt(x * x + y * y))
         return LatLng(Math.toDegrees(lat), Math.toDegrees(lon))
     }
+
+    /**
+     * Punto a una fracción [t] (0 = [a], 1 = [b]) del camino entre dos puntos. Lineal en
+     * grados: sobra para las distancias de una ciudad y no se usa cerca del antimeridiano.
+     */
+    fun interpolate(a: LatLng, b: LatLng, t: Double): LatLng {
+        require(t in 0.0..1.0) { "Fracción fuera de rango: $t" }
+        return LatLng(
+            a.latitude + (b.latitude - a.latitude) * t,
+            a.longitude + (b.longitude - a.longitude) * t,
+        )
+    }
 }

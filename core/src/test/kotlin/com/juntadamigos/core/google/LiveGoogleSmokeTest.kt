@@ -59,7 +59,7 @@ class LiveGoogleSmokeTest {
         val finder = MeetingPointFinder(GooglePlaceSearch(key), GoogleRouteMatrix(key))
         for (category in listOf(PlaceCategory.CAFE, PlaceCategory.BAR)) {
             val result = finder.find(people, category, maxIndividualTravel = 60.minutes)
-            println("[live] $category centro=${result.searchCenter} radio=${result.searchRadiusMeters.toInt()}m " +
+            println("[live] $category zonas=${result.searchAreas} " +
                 "evaluados=${result.candidatesEvaluated} sinRuta=${result.discardedUnreachable} sobreTope=${result.discardedOverCap}")
             result.suggestions.forEach { s ->
                 println("[live]   ${s.place.name} (${s.place.address}) total=${s.totalTravelTime} peor=${s.maxTravelTime} ${s.travelTimes}")

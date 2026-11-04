@@ -11,11 +11,14 @@ App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos
 
 ## Cómo decide el lugar
 
-1. Calcula el centro geográfico de los participantes (el dueño de la app cuenta como uno más).
-2. Busca hasta 15 lugares de la categoría elegida (café, bar, restaurante, parque, shopping) alrededor de ese centro con **Places API (New)**.
-3. Pide a **Routes API** (`computeRouteMatrix`) el tiempo de cada participante a cada candidato, una matriz por modo de viaje.
-4. Descarta candidatos sin ruta para alguien y, si se configuró, los que superan un tope de viaje individual.
-5. Ordena por **menor tiempo total**, desempata por el peor viaje individual y después por rating.
+1. Arma puntos de muestra: el centro geográfico y 4 puntos entre el centro y cada participante (el último es su casa). El dueño de la app cuenta como uno más.
+2. Pide a **Routes API** (`computeRouteMatrix`) el tiempo real de todos a esos puntos y elige las 3 zonas de menor tiempo total ponderado.
+3. Busca hasta 15 lugares de la categoría elegida (café, bar, restaurante, parque, shopping) en esas zonas con **Places API (New)**.
+4. Pide el tiempo de cada participante a cada candidato, una matriz por modo de viaje.
+5. Descarta candidatos sin ruta para alguien y, si se configuró, los que superan un tope de viaje individual.
+6. Ordena por **menor tiempo total ponderado**: un minuto de quien va en transporte, a pie o en bici pesa 1.5 veces uno en auto (`Config.modeWeights`). Desempata por el peor viaje individual y después por rating. La app muestra los tiempos reales.
+
+Por qué no buscar solo alrededor del centro: si uno va en auto y otro sin auto, el mejor lugar suele quedar del lado del que viaja más lento, y un círculo en el centro nunca llega ahí (además Places devuelve lo más popular del círculo, típicamente el microcentro).
 
 El tope individual (`maxIndividualTravel`) existe porque "menor tiempo total" castiga al que vive lejos: si tres están juntos y uno lejos, el lugar queda pegado al grupo.
 
