@@ -9,6 +9,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -42,9 +44,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +63,6 @@ import com.juntadamigos.core.LatLng
 import com.juntadamigos.core.MeetingResult
 import com.juntadamigos.core.MeetingShare
 import com.juntadamigos.core.Suggestion
-import kotlinx.coroutines.launch
 import com.google.android.gms.maps.model.LatLng as MapLatLng
 
 /** Resultados: mapa con amigos y top 3, y por cada lugar tiempos, Google Maps y WhatsApp. */
@@ -75,6 +76,15 @@ fun ResultsScreen(
     val context = LocalContext.current
     val names = remember(people) { people.associate { it.id to it.displayName } }
     var selected by rememberSaveable(result) { mutableIntStateOf(0) }
+    // Qué encuadra el mapa: null = todos (amigos + lugares), i = zoom al lugar i.
+    // focusRequest cambia en cada toque para re-centrar aunque se toque el mismo lugar.
+    var focus by rememberSaveable(result) { mutableStateOf<Int?>(null) }
+    var focusRequest by rememberSaveable(result) { mutableIntStateOf(0) }
+    val focusPlace: (Int) -> Unit = { i ->
+        selected = i
+        focus = i
+        focusRequest++
+    }
 
     Scaffold(
         topBar = {
@@ -91,7 +101,13 @@ fun ResultsScreen(
                 result = result,
                 people = people,
                 selected = selected,
-                onSelect = { selected = it },
+                focus = focus,
+                focusRequest = focusRequest,
+                onSelect = focusPlace,
+                onShowAll = {
+                    focus = null
+                    focusRequest++
+                },
                 modifier = Modifier.fillMaxWidth().height(320.dp),
             )
             LazyColumn(
@@ -105,7 +121,7 @@ fun ResultsScreen(
                         s = s,
                         names = names,
                         selected = i == selected,
-                        onClick = { selected = i },
+                        onClick = { focusPlace(i) },
                         onOpenMaps = { openUrl(context, MeetingShare.mapsUrl(s.place)) },
                         onShare = { shareOnWhatsApp(context, MeetingShare.message(s, names)) },
                     )
@@ -120,56 +136,85 @@ private fun ResultsMap(
     result: MeetingResult,
     people: List<PersonInput>,
     selected: Int,
+    focus: Int?,
+    focusRequest: Int,
     onSelect: (Int) -> Unit,
+    onShowAll: () -> Unit,
     modifier: Modifier,
 ) {
     val camera = rememberCameraPositionState()
-    val scope = rememberCoroutineScope()
     var loaded by remember { mutableStateOf(false) }
+    var firstFrame by remember { mutableStateOf(true) }
     val friends = people.mapNotNull { p -> p.resolved?.let { p to it.location.toMap() } }
     val places = result.suggestions.map { it.place.location.toMap() }
 
-    // Encuadre inicial: todos los amigos y lugares. newLatLngBounds necesita el mapa medido.
-    LaunchedEffect(loaded, result) {
+    // Mueve la cámara según el foco. newLatLngBounds necesita el mapa medido (loaded).
+    // El primer encuadre es instantáneo; los siguientes, animados.
+    LaunchedEffect(loaded, result, focusRequest) {
         if (!loaded) return@LaunchedEffect
-        val points = friends.map { it.second } + places
-        if (points.isEmpty()) return@LaunchedEffect
-        val bounds = LatLngBounds.builder().apply { points.forEach { include(it) } }.build()
-        camera.move(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+        val target = focus?.let { places.getOrNull(it) }
+        val update = if (target != null) {
+            CameraUpdateFactory.newLatLngZoom(target, PLACE_ZOOM)
+        } else {
+            val points = friends.map { it.second } + places
+            if (points.isEmpty()) return@LaunchedEffect
+            val bounds = LatLngBounds.builder().apply { points.forEach { include(it) } }.build()
+            CameraUpdateFactory.newLatLngBounds(bounds, 120)
+        }
+        if (firstFrame) {
+            camera.move(update)
+            firstFrame = false
+        } else {
+            camera.animate(update, durationMs = 700)
+        }
     }
 
-    GoogleMap(
-        modifier = modifier,
-        cameraPositionState = camera,
-        uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
-        onMapLoaded = { loaded = true },
-    ) {
-        friends.forEach { (person, position) ->
-            Marker(
-                state = rememberMarkerState(key = "p-${person.id}", position = position),
-                title = person.displayName,
-                snippet = modeLabel(person.mode),
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-            )
+    Box(modifier) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = camera,
+            uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
+            onMapLoaded = { loaded = true },
+        ) {
+            friends.forEach { (person, position) ->
+                Marker(
+                    state = rememberMarkerState(key = "p-${person.id}", position = position),
+                    title = person.displayName,
+                    snippet = modeLabel(person.mode),
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                )
+            }
+            result.suggestions.forEachIndexed { i, s ->
+                val markerState = rememberMarkerState(key = "l-${s.place.id}", position = places[i])
+                Marker(
+                    state = markerState,
+                    title = "${i + 1}. ${s.place.name}",
+                    snippet = "Total ${MeetingShare.formatDuration(s.totalTravelTime)}",
+                    icon = BitmapDescriptorFactory.defaultMarker(
+                        if (i == selected) BitmapDescriptorFactory.HUE_RED else BitmapDescriptorFactory.HUE_ORANGE,
+                    ),
+                    zIndex = if (i == selected) 2f else 1f,
+                    onClick = {
+                        onSelect(i)
+                        markerState.showInfoWindow()
+                        true // true = la cámara la movemos nosotros (con zoom), no el mapa
+                    },
+                )
+            }
         }
-        result.suggestions.forEachIndexed { i, s ->
-            Marker(
-                state = rememberMarkerState(key = "l-${s.place.id}", position = places[i]),
-                title = "${i + 1}. ${s.place.name}",
-                snippet = "Total ${MeetingShare.formatDuration(s.totalTravelTime)}",
-                icon = BitmapDescriptorFactory.defaultMarker(
-                    if (i == selected) BitmapDescriptorFactory.HUE_RED else BitmapDescriptorFactory.HUE_ORANGE,
-                ),
-                zIndex = if (i == selected) 2f else 1f,
-                onClick = {
-                    onSelect(i)
-                    scope.launch { camera.animate(CameraUpdateFactory.newLatLng(places[i])) }
-                    false // false = además mostrar el título del marcador
-                },
-            )
+        if (focus != null) {
+            SmallFloatingActionButton(
+                onClick = onShowAll,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+            ) {
+                Text("Ver todos", modifier = Modifier.padding(horizontal = 12.dp))
+            }
         }
     }
 }
+
+/** Zoom al tocar un lugar: nivel calle, se ven las cuadras alrededor. */
+private const val PLACE_ZOOM = 15f
 
 @Composable
 private fun Summary(result: MeetingResult) {
