@@ -41,7 +41,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,22 +48,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.juntadamigos.core.MeetingResult
 import com.juntadamigos.core.PlaceCategory
-import com.juntadamigos.core.Suggestion
 import com.juntadamigos.core.TravelMode
-import java.net.URLEncoder
-import kotlin.time.Duration
 
 @Composable
 fun MeetingScreen(viewModel: MeetingViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val result = state.result
+    if (state.showingResults && result != null) {
+        ResultsScreen(
+            result = result,
+            people = state.people,
+            onBack = viewModel::closeResults,
+        )
+        return
+    }
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(state.error) {
@@ -123,10 +125,11 @@ fun MeetingScreen(viewModel: MeetingViewModel) {
                     Text(if (state.searching) "Buscando…" else "Buscar lugar")
                 }
             }
-            state.result?.let { result ->
-                item { ResultHeader(result) }
-                items(result.suggestions, key = { it.place.id }) { s ->
-                    SuggestionCard(s, names = state.people.associate { it.id to it.displayName })
+            if (state.result != null && !state.showingResults) {
+                item {
+                    OutlinedButton(onClick = viewModel::reopenResults, modifier = Modifier.fillMaxWidth()) {
+                        Text("Ver resultados")
+                    }
                 }
             }
         }
@@ -230,48 +233,7 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onS
     }
 }
 
-@Composable
-private fun ResultHeader(result: MeetingResult) {
-    val discarded = buildList {
-        if (result.discardedUnreachable > 0) add("${result.discardedUnreachable} sin ruta para alguien")
-        if (result.discardedOverCap > 0) add("${result.discardedOverCap} superan el tope")
-    }.joinToString(", ")
-    Column {
-        Text(
-            if (result.suggestions.isEmpty()) "No encontramos lugares que sirvan a todos" else "Mejores lugares",
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Text(
-            "Se evaluaron ${result.candidatesEvaluated} lugares" + if (discarded.isNotEmpty()) " ($discarded)." else ".",
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
-@Composable
-private fun SuggestionCard(s: Suggestion, names: Map<String, String>) {
-    val uri = LocalUriHandler.current
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(s.place.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            s.place.address?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            Text(
-                "Total ${formatDuration(s.totalTravelTime)} · peor viaje ${formatDuration(s.maxTravelTime)}" +
-                    (s.place.rating?.let { " · ★ %.1f".format(it) } ?: ""),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            s.travelTimes.entries.sortedByDescending { it.value }.forEach { (id, d) ->
-                Text("${names[id] ?: id}: ${formatDuration(d)}", style = MaterialTheme.typography.bodySmall)
-            }
-            TextButton(onClick = {
-                val q = URLEncoder.encode(s.place.name, "UTF-8")
-                uri.openUri("https://www.google.com/maps/search/?api=1&query=$q&query_place_id=${s.place.id}")
-            }) { Text("Abrir en Google Maps") }
-        }
-    }
-}
-
-private fun modeLabel(m: TravelMode) = when (m) {
+internal fun modeLabel(m: TravelMode) = when (m) {
     TravelMode.DRIVE -> "Auto"
     TravelMode.TRANSIT -> "Transporte"
     TravelMode.WALK -> "A pie"
@@ -284,9 +246,4 @@ private fun categoryLabel(c: PlaceCategory) = when (c) {
     PlaceCategory.RESTAURANT -> "Restaurante"
     PlaceCategory.PARK -> "Parque"
     PlaceCategory.SHOPPING_MALL -> "Shopping"
-}
-
-internal fun formatDuration(d: Duration): String {
-    val minutes = (d.inWholeSeconds + 30) / 60
-    return if (minutes < 60) "$minutes min" else "${minutes / 60} h ${"%02d".format(minutes % 60)} min"
 }

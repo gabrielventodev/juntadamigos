@@ -47,6 +47,8 @@ data class MeetingUiState(
     val capMinutes: Int = 45,
     val searching: Boolean = false,
     val result: MeetingResult? = null,
+    /** Pantalla de resultados abierta. Se cierra con atrás y se mantiene el resultado. */
+    val showingResults: Boolean = false,
     val error: String? = null,
     val missingApiKey: Boolean = false,
 ) {
@@ -138,6 +140,10 @@ class MeetingViewModel(
 
     fun onCapMinutesChange(minutes: Int) = _state.update { it.copy(capMinutes = minutes, result = null) }
 
+    fun reopenResults() = _state.update { it.copy(showingResults = it.result != null) }
+
+    fun closeResults() = _state.update { it.copy(showingResults = false) }
+
     fun dismissError() = _state.update { it.copy(error = null) }
 
     fun search() {
@@ -153,14 +159,14 @@ class MeetingViewModel(
         }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            _state.update { it.copy(searching = true, error = null, result = null) }
+            _state.update { it.copy(searching = true, error = null, result = null, showingResults = false) }
             try {
                 val result = finder.find(
                     participants = participants,
                     category = s.category,
                     maxIndividualTravel = if (s.capEnabled) s.capMinutes.minutes else null,
                 )
-                _state.update { it.copy(searching = false, result = result) }
+                _state.update { it.copy(searching = false, result = result, showingResults = true) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
