@@ -4,30 +4,31 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 /**
- * Elige el lugar real que minimiza el tiempo total de viaje del grupo, ponderado por modo:
- * un minuto de quien va sin auto pesa más que uno de quien maneja ([Config.modeWeights]).
+ * Elige el lugar real más parejo para el grupo, con prioridad para quien va sin auto.
+ *
+ * Criterio (decidido por Gabriel el 2026-11-04, ver [rankKey]):
+ * 1. Quien va sin auto (transporte, a pie, bici) no viaja más de [Config.noCarMaxTravel] (20 min).
+ * 2. Entre los lugares que cumplen eso, gana el de menor peor viaje: todos llegan parecido.
+ * 3. Desempata el menor tiempo total y después el rating.
+ * Respaldo si ningún lugar cumple el punto 1: gana el que menos se pasa de los 20 min para
+ * quien va sin auto (en escalones de [Config.noCarFallbackStep]) y, dentro del escalón, el más parejo.
  *
  * Algoritmo:
  * 1. Arma puntos de muestra: el centro geográfico y puntos sobre el segmento entre el centro
  *    y cada participante (incluida su propia ubicación).
  * 2. Pide los tiempos reales de todos a esos puntos y se queda con las [Config.searchAreas]
- *    zonas de menor tiempo total.
+ *    zonas que mejor cumplen el criterio.
  * 3. Busca lugares de la categoría elegida alrededor de esas zonas.
  * 4. Para cada modo de viaje, pide una matriz de tiempos (participantes con ese modo × candidatos).
  * 5. Descarta candidatos donde alguien no tiene ruta o donde alguien supera el tope individual.
- * 6. Ordena por menor tiempo total ponderado; desempata por menor peor viaje individual.
+ * 6. Ordena con el criterio de arriba.
  *
- * Por qué no buscar solo alrededor del centro geográfico: si uno va en auto y otro en
- * colectivo, el menor tiempo total está corrido hacia quien viaja más lento, a veces casi en
- * su casa. Un círculo en el centro nunca llega ahí y además Places devuelve los lugares más
- * populares del círculo (el microcentro), que favorecen al que va en auto. Muestrear tiempos
- * reales primero lleva la búsqueda a donde el grupo de verdad tarda menos.
- *
- * Por qué ponderar: con transporte público el tiempo total sin ponderar suele ganarlo el
- * microcentro (los trenes llegan rápido ahí), y el que va en colectivo termina viajando más
- * que el que maneja. Validado con direcciones reales de San Isidro (auto) y Lomas (colectivo).
+ * Historia: "menor tiempo total" dejaba al de auto en 1 h y al de colectivo en 5 min (o al
+ * revés, según dónde se buscaba). Probado en el celular de Gabriel: Jose a pie 4 min,
+ * Gabriel en auto 51 min. De ahí el criterio parejo con tope para el que va sin auto.
  */
 class MeetingPointFinder(
     private val placeSearch: PlaceSearch,
@@ -35,16 +36,10 @@ class MeetingPointFinder(
     private val config: Config = Config(),
 ) {
     data class Config(
-        /**
-         * Peso de cada minuto de viaje según el modo. 1.5 = un minuto a pie o en colectivo
-         * cuenta como uno y medio en auto. Los tiempos que se muestran siguen siendo los reales.
-         */
-        val modeWeights: Map<TravelMode, Double> = mapOf(
-            TravelMode.DRIVE to 1.0,
-            TravelMode.TRANSIT to 1.5,
-            TravelMode.WALK to 1.5,
-            TravelMode.BICYCLE to 1.5,
-        ),
+        /** Tope para quien va sin auto (transporte, a pie, bici). */
+        val noCarMaxTravel: Duration = 20.minutes,
+        /** Si nadie cumple el tope, pasarse 0-5 min cuenta igual, 5-10 peor, etc. */
+        val noCarFallbackStep: Duration = 5.minutes,
         /** Cantidad de candidatos a evaluar. Más candidatos = mejor resultado y más costo de API. */
         val maxCandidates: Int = 15,
         /** Puntos de muestra entre el centro y cada participante (el último es su ubicación). */
@@ -61,7 +56,7 @@ class MeetingPointFinder(
         val maxMatrixElements: Int = 100,
     ) {
         init {
-            require(TravelMode.entries.all { (modeWeights[it] ?: 0.0) > 0.0 }) { "Falta un peso positivo por modo" }
+            require(noCarMaxTravel.isPositive() && noCarFallbackStep.isPositive())
             require(maxCandidates > 0)
             require(samplesPerParticipant > 0)
             require(searchAreas > 0)
@@ -109,7 +104,7 @@ class MeetingPointFinder(
             }
             @Suppress("UNCHECKED_CAST")
             val real = perPerson as Map<String, Duration>
-            val suggestion = Suggestion(place, real, score = weightedTotal(participants) { real.getValue(it.id) })
+            val suggestion = Suggestion(place, real)
             if (maxIndividualTravel != null && suggestion.maxTravelTime > maxIndividualTravel) {
                 overCap++
                 return@mapIndexedNotNull null
@@ -118,9 +113,7 @@ class MeetingPointFinder(
         }
 
         val ranked = suggestions.sortedWith(
-            // Redondeo a segundos: diferencias menores no significan nada y las APIs devuelven segundos.
-            compareBy<Suggestion> { it.score.inWholeSeconds }
-                .thenBy { it.maxTravelTime.inWholeSeconds }
+            compareBy<Suggestion> { rankKey(participants, it.travelTimes) }
                 .thenByDescending { it.place.rating ?: 0.0 },
         )
 
@@ -133,8 +126,23 @@ class MeetingPointFinder(
         )
     }
 
-    private inline fun weightedTotal(participants: List<Participant>, time: (Participant) -> Duration): Duration =
-        participants.fold(Duration.ZERO) { acc, p -> acc + time(p) * config.modeWeights.getValue(p.mode) }
+    /** Orden de un lugar: primero cuánto se pasa del tope quien va sin auto, después el peor viaje, después el total. */
+    internal data class RankKey(val noCarOverSteps: Long, val maxMinutes: Long, val totalSeconds: Long) : Comparable<RankKey> {
+        override fun compareTo(other: RankKey): Int =
+            compareValuesBy(this, other, { it.noCarOverSteps }, { it.maxMinutes }, { it.totalSeconds })
+    }
+
+    internal fun rankKey(participants: List<Participant>, times: Map<String, Duration>): RankKey {
+        val noCarWorst = participants.filter { it.mode != TravelMode.DRIVE }
+            .maxOfOrNull { times.getValue(it.id) } ?: Duration.ZERO
+        val over = noCarWorst - config.noCarMaxTravel
+        val steps = if (!over.isPositive()) 0L else
+            (over.inWholeSeconds + config.noCarFallbackStep.inWholeSeconds - 1) / config.noCarFallbackStep.inWholeSeconds
+        val max = times.values.max()
+        // Peor viaje redondeado al minuto: 1 min de diferencia no hace más justo un lugar; desempata el total.
+        val total = times.values.fold(Duration.ZERO) { acc, d -> acc + d }
+        return RankKey(steps, (max.inWholeSeconds + 30) / 60, total.inWholeSeconds)
+    }
 
     /** Radio de cada zona: el paso entre puntos de muestra, para cubrir el hueco entre ellos. */
     internal fun searchRadius(center: LatLng, participants: List<Participant>): Double {
@@ -162,12 +170,11 @@ class MeetingPointFinder(
         val samples = samplePoints(center, participants)
         val times = travelTimesByParticipant(participants, samples)
         val scored = samples.indices.mapNotNull { j ->
-            val perPerson = participants.associateWith { times.getValue(it.id)[j] ?: return@mapNotNull null }
-            val total = weightedTotal(participants) { perPerson.getValue(it) }
-            // Con tope, preferir zonas que lo cumplen; las demás quedan como último recurso.
+            val perPerson = participants.associate { p -> p.id to (times.getValue(p.id)[j] ?: return@mapNotNull null) }
+            // Con tope individual, preferir zonas que lo cumplen; las demás quedan como último recurso.
             val overCap = maxIndividualTravel != null && perPerson.values.max() > maxIndividualTravel
-            Triple(samples[j], overCap, total)
-        }.sortedWith(compareBy<Triple<LatLng, Boolean, Duration>> { it.second }.thenBy { it.third })
+            Triple(samples[j], overCap, rankKey(participants, perPerson))
+        }.sortedWith(compareBy<Triple<LatLng, Boolean, RankKey>> { it.second }.thenBy { it.third })
 
         val chosen = mutableListOf<LatLng>()
         for ((point, _, _) in scored) {

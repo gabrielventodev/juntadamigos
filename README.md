@@ -1,6 +1,6 @@
 # juntadamigos
 
-App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos, minimizando el tiempo total de viaje según cómo viaja cada uno (auto, transporte público, a pie, bici).
+App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos, buscando que todos lleguen en un tiempo parecido según cómo viaja cada uno (auto, transporte público, a pie, bici).
 
 ## Estado
 
@@ -12,15 +12,20 @@ App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos
 ## Cómo decide el lugar
 
 1. Arma puntos de muestra: el centro geográfico y 4 puntos entre el centro y cada participante (el último es su casa). El dueño de la app cuenta como uno más.
-2. Pide a **Routes API** (`computeRouteMatrix`) el tiempo real de todos a esos puntos y elige las 3 zonas de menor tiempo total ponderado.
+2. Pide a **Routes API** (`computeRouteMatrix`) el tiempo real de todos a esos puntos y elige las 3 zonas que mejor cumplen el criterio de abajo.
 3. Busca hasta 15 lugares de la categoría elegida (café, bar, restaurante, parque, shopping) en esas zonas con **Places API (New)**.
 4. Pide el tiempo de cada participante a cada candidato, una matriz por modo de viaje.
 5. Descarta candidatos sin ruta para alguien y, si se configuró, los que superan un tope de viaje individual.
-6. Ordena por **menor tiempo total ponderado**: un minuto de quien va en transporte, a pie o en bici pesa 1.5 veces uno en auto (`Config.modeWeights`). Desempata por el peor viaje individual y después por rating. La app muestra los tiempos reales.
+6. Ordena así:
+   - Quien va sin auto (transporte, a pie, bici) no viaja más de **20 min** (`Config.noCarMaxTravel`).
+   - Entre esos lugares gana el de **menor peor viaje**, o sea el más parejo. Desempata el tiempo total y después el rating.
+   - **Respaldo** si ningún lugar cumple los 20 min: gana el que menos se pasa para quien va sin auto, en escalones de 5 min (`Config.noCarFallbackStep`), y dentro del escalón el más parejo.
 
 Por qué no buscar solo alrededor del centro: si uno va en auto y otro sin auto, el mejor lugar suele quedar del lado del que viaja más lento, y un círculo en el centro nunca llega ahí (además Places devuelve lo más popular del círculo, típicamente el microcentro).
 
-El tope individual (`maxIndividualTravel`) existe porque "menor tiempo total" castiga al que vive lejos: si tres están juntos y uno lejos, el lugar queda pegado al grupo.
+El tope individual de la app (`maxIndividualTravel`) es otro filtro, para todos: descarta lugares donde alguien supera ese tiempo.
+
+Límite conocido: los 20 min a pie son unos 1,6 km. Si el de auto tarda 45 min en llegar a cualquier punto de esa zona (tráfico en hora pico), el resultado no puede ser parejo: gana el lugar donde el de auto tarda menos dentro de esa zona.
 
 ## Uso
 
