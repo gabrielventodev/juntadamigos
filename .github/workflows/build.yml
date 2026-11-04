@@ -18,6 +18,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Tests del motor y build de la app
         run: ./gradlew :core:test :app:assembleDebug --stacktrace
+      # AAB de release sin firmar: verifica que R8 (minify + shrinkResources) compile.
+      # No prueba que la app ande minificada; eso se valida instalando el release en un celular.
+      - name: Bundle de release (R8)
+        run: ./gradlew :app:bundleRelease --stacktrace
       - uses: actions/upload-artifact@v4
         if: success()
         with:
