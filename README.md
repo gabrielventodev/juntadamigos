@@ -5,8 +5,8 @@ App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos
 ## Estado
 
 - [x] **Paso 1: motor de cálculo** (`core/`, Kotlin puro, sin Android)
-- [ ] Paso 2: app Android MVP (`app/`, Jetpack Compose): código listo, falta validar con APIs reales
-- [ ] Paso 3: pantalla de resultados (mapa, top 3, compartir)
+- [x] **Paso 2: app Android MVP** (`app/`, Jetpack Compose)
+- [x] **Paso 3: pantalla de resultados**: mapa con amigos y top 3, tiempo por persona, abrir en Google Maps y compartir por WhatsApp
 - [ ] Paso 4: publicación en Play Store
 
 ## Cómo decide el lugar
@@ -46,12 +46,12 @@ Habilitar en Google Cloud Console, en el mismo proyecto:
 
 | API | Para qué | Uso por búsqueda |
 |---|---|---|
-| Places API (New) | Lugares candidatos y autocompletado de direcciones | 1 Nearby Search + 1 sesión de autocompletado por dirección |
-| Routes API | Matriz de tiempos de viaje | participantes × 15 elementos |
+| Places API (New) | Lugares candidatos y autocompletado de direcciones | hasta 3 Nearby Search + 1 sesión de autocompletado por dirección |
+| Routes API | Matriz de tiempos de viaje | participantes × (1 + 4 × participantes) para elegir zonas + participantes × 15 |
 | Geocoding API | Solo pruebas del motor; la app no la usa (no acepta keys restringidas a Android) | — |
 | Maps SDK for Android | Mapa en la app (paso 3) | por carga de mapa |
 
-Costo: con 4 amigos son ~60 elementos de matriz por búsqueda. El tráfico en tiempo real para auto (`trafficAware = true`) usa un SKU más caro; se puede desactivar. Configurar un tope de gasto en Cloud Billing antes de publicar.
+Costo: con 4 amigos son ~130 elementos de matriz por búsqueda. El tráfico en tiempo real para auto (`trafficAware = true`) usa un SKU más caro; se puede desactivar. Configurar un tope de gasto en Cloud Billing antes de publicar.
 
 ## Desarrollo
 
@@ -65,7 +65,7 @@ Requiere JDK 17+ y Android SDK (API 35).
 ### API key
 
 - **App:** poné `MAPS_API_KEY=tu_key` en `local.properties` (no se commitea). El Secrets Gradle Plugin la expone como `BuildConfig.MAPS_API_KEY`. Sin key, la app compila con `local.defaults.properties` y avisa en pantalla.
-- **Restricción:** restringí la key de la app a "Apps de Android" con el paquete `com.juntadamigos.app` y el SHA-1 de tu certificado de firma (`./gradlew :app:signingReport`). La app manda `X-Android-Package` y `X-Android-Cert` en cada request REST, que es lo que Google necesita para validar esa restricción. Limitá también las APIs de la key a Places API (New) y Routes API.
+- **Restricción:** restringí la key de la app a "Apps de Android" con el paquete `com.juntadamigos.app` y el SHA-1 de tu certificado de firma (`./gradlew :app:signingReport`). La app manda `X-Android-Package` y `X-Android-Cert` en cada request REST, que es lo que Google necesita para validar esa restricción. Limitá también las APIs de la key a Places API (New), Routes API y Maps SDK for Android (sin esta última el mapa de resultados queda gris).
 - **Pruebas reales del motor** (cuestan plata, opt-in):
 
 ```bash

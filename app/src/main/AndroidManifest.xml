@@ -9,6 +9,10 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Juntadamigos">
+        <!-- Maps SDK for Android. El Secrets Gradle Plugin reemplaza MAPS_API_KEY desde local.properties. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${MAPS_API_KEY}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
