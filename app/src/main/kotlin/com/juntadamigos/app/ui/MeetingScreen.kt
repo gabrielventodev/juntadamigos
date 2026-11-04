@@ -207,7 +207,7 @@ private fun OptionsSection(state: MeetingUiState, viewModel: MeetingViewModel) {
             Column(Modifier.weight(1f)) {
                 Text("Tope por persona", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (state.capEnabled) "Nadie viaja más de ${state.capMinutes} min" else "Sin tope: gana el menor tiempo total",
+                    if (state.capEnabled) "Nadie viaja más de ${state.capMinutes} min" else "Sin tope: gana el más parejo (sin auto: máx. 20 min, a pie 35)",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
