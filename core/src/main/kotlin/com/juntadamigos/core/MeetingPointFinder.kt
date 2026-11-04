@@ -10,10 +10,11 @@ import kotlin.time.Duration.Companion.minutes
  * Elige el lugar real más parejo para el grupo, con prioridad para quien va sin auto.
  *
  * Criterio (decidido por Gabriel el 2026-11-04, ver [rankKey]):
- * 1. Quien va sin auto (transporte, a pie, bici) no viaja más de [Config.noCarMaxTravel] (20 min).
+ * 1. Quien va sin auto no viaja más de su tope ([Config.noCarMaxTravel]): 20 min en transporte
+ *    o bici, 35 min a pie (20 min a pie son ~1,6 km y no alcanza para emparejar con un auto en tráfico).
  * 2. Entre los lugares que cumplen eso, gana el de menor peor viaje: todos llegan parecido.
  * 3. Desempata el menor tiempo total y después el rating.
- * Respaldo si ningún lugar cumple el punto 1: gana el que menos se pasa de los 20 min para
+ * Respaldo si ningún lugar cumple el punto 1: gana el que menos se pasa de su tope para
  * quien va sin auto (en escalones de [Config.noCarFallbackStep]) y, dentro del escalón, el más parejo.
  *
  * Algoritmo:
@@ -36,8 +37,12 @@ class MeetingPointFinder(
     private val config: Config = Config(),
 ) {
     data class Config(
-        /** Tope para quien va sin auto (transporte, a pie, bici). */
-        val noCarMaxTravel: Duration = 20.minutes,
+        /** Tope por modo para quien va sin auto. DRIVE no tiene tope. */
+        val noCarMaxTravel: Map<TravelMode, Duration> = mapOf(
+            TravelMode.TRANSIT to 20.minutes,
+            TravelMode.BICYCLE to 20.minutes,
+            TravelMode.WALK to 35.minutes,
+        ),
         /** Si nadie cumple el tope, pasarse 0-5 min cuenta igual, 5-10 peor, etc. */
         val noCarFallbackStep: Duration = 5.minutes,
         /** Cantidad de candidatos a evaluar. Más candidatos = mejor resultado y más costo de API. */
@@ -56,7 +61,10 @@ class MeetingPointFinder(
         val maxMatrixElements: Int = 100,
     ) {
         init {
-            require(noCarMaxTravel.isPositive() && noCarFallbackStep.isPositive())
+            require(noCarFallbackStep.isPositive())
+            require(TravelMode.entries.filter { it != TravelMode.DRIVE }.all { noCarMaxTravel[it]?.isPositive() == true }) {
+                "Falta el tope de algún modo sin auto"
+            }
             require(maxCandidates > 0)
             require(samplesPerParticipant > 0)
             require(searchAreas > 0)
@@ -133,9 +141,8 @@ class MeetingPointFinder(
     }
 
     internal fun rankKey(participants: List<Participant>, times: Map<String, Duration>): RankKey {
-        val noCarWorst = participants.filter { it.mode != TravelMode.DRIVE }
-            .maxOfOrNull { times.getValue(it.id) } ?: Duration.ZERO
-        val over = noCarWorst - config.noCarMaxTravel
+        val over = participants.filter { it.mode != TravelMode.DRIVE }
+            .maxOfOrNull { times.getValue(it.id) - config.noCarMaxTravel.getValue(it.mode) } ?: Duration.ZERO
         val steps = if (!over.isPositive()) 0L else
             (over.inWholeSeconds + config.noCarFallbackStep.inWholeSeconds - 1) / config.noCarFallbackStep.inWholeSeconds
         val max = times.values.max()

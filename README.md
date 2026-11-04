@@ -17,15 +17,15 @@ App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos
 4. Pide el tiempo de cada participante a cada candidato, una matriz por modo de viaje.
 5. Descarta candidatos sin ruta para alguien y, si se configuró, los que superan un tope de viaje individual.
 6. Ordena así:
-   - Quien va sin auto (transporte, a pie, bici) no viaja más de **20 min** (`Config.noCarMaxTravel`).
+   - Quien va sin auto no viaja más de su tope (`Config.noCarMaxTravel`): **20 min** en transporte o bici, **35 min** a pie.
    - Entre esos lugares gana el de **menor peor viaje**, o sea el más parejo. Desempata el tiempo total y después el rating.
-   - **Respaldo** si ningún lugar cumple los 20 min: gana el que menos se pasa para quien va sin auto, en escalones de 5 min (`Config.noCarFallbackStep`), y dentro del escalón el más parejo.
+   - **Respaldo** si ningún lugar cumple el tope: gana el que menos se pasa para quien va sin auto, en escalones de 5 min (`Config.noCarFallbackStep`), y dentro del escalón el más parejo.
 
 Por qué no buscar solo alrededor del centro: si uno va en auto y otro sin auto, el mejor lugar suele quedar del lado del que viaja más lento, y un círculo en el centro nunca llega ahí (además Places devuelve lo más popular del círculo, típicamente el microcentro).
 
 El tope individual de la app (`maxIndividualTravel`) es otro filtro, para todos: descarta lugares donde alguien supera ese tiempo.
 
-Límite conocido: los 20 min a pie son unos 1,6 km. Si el de auto tarda 45 min en llegar a cualquier punto de esa zona (tráfico en hora pico), el resultado no puede ser parejo: gana el lugar donde el de auto tarda menos dentro de esa zona.
+Por qué 35 min a pie: 20 min caminando son unos 1,6 km, y en hora pico el auto tardaba lo mismo (45-50 min) a cualquier punto de esa zona, así que el resultado no podía ser parejo.
 
 ## Uso
 

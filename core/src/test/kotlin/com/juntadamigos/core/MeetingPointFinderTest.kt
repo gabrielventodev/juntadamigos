@@ -223,9 +223,9 @@ class MeetingPointFinderTest {
     }
 
     @Test
-    fun `caso Gabriel y Jose - parejo con Jose a pie dentro de 20 min`() = runTest {
+    fun `caso Gabriel y Jose - parejo con Jose a pie dentro de su tope`() = runTest {
         // Antes: Jose a pie 4 min y Gabriel en auto 51 min. Ahora gana el lugar donde el peor
-        // viaje es menor, siempre que Jose no camine más de 20 min.
+        // viaje es menor, siempre que Jose no camine más de 35 min.
         val friends = listOf(
             Participant("gabriel", "Gabriel", at(0.00), TravelMode.DRIVE),
             Participant("jose", "Jose", at(0.10), TravelMode.WALK),
@@ -240,17 +240,17 @@ class MeetingPointFinderTest {
 
         val best = result.suggestions.first()
         assertEquals("parejo", best.place.id)
-        assertTrue(best.travelTimes.getValue("jose") <= 20.minutes)
+        assertTrue(best.travelTimes.getValue("jose") <= 35.minutes)
     }
 
     @Test
-    fun `respaldo - si nadie cumple 20 min gana el que menos se pasa para quien va sin auto`() = runTest {
+    fun `respaldo - si nadie cumple su tope gana el que menos se pasa para quien va sin auto`() = runTest {
         val friends = listOf(
             Participant("auto", "Auto", at(0.00), TravelMode.DRIVE),
             Participant("pie", "A pie", at(0.10), TravelMode.WALK),
         )
-        // Todos quedan a más de 20 min caminando.
-        val places = listOf(place("lejos-pie", 0.07), place("menos-lejos", 0.08), place("auto", 0.01))
+        // Todos quedan a más de 35 min caminando.
+        val places = listOf(place("lejos-pie", 0.06), place("menos-lejos", 0.065), place("auto", 0.01))
         val result = MeetingPointFinder(FakePlaces(places), FakeMatrix()).find(friends, PlaceCategory.CAFE)
         assertEquals(listOf("menos-lejos", "lejos-pie", "auto"), result.suggestions.map { it.place.id })
     }
@@ -259,7 +259,7 @@ class MeetingPointFinderTest {
     fun `cumplir el tope sin auto pesa mas que ser parejo`() {
         val friends = listOf(
             Participant("auto", "Auto", at(0.00), TravelMode.DRIVE),
-            Participant("pie", "A pie", at(0.10), TravelMode.WALK),
+            Participant("pie", "Colectivo", at(0.10), TravelMode.TRANSIT),
         )
         val finder = MeetingPointFinder(FakePlaces(emptyList()), FakeMatrix())
         val dentro = finder.rankKey(friends, mapOf("auto" to 40.minutes, "pie" to 19.minutes))
@@ -269,5 +269,16 @@ class MeetingPointFinderTest {
         val pasa1 = finder.rankKey(friends, mapOf("auto" to 50.minutes, "pie" to 21.minutes))
         val pasa4 = finder.rankKey(friends, mapOf("auto" to 25.minutes, "pie" to 24.minutes))
         assertTrue(pasa4 < pasa1)
+    }
+
+    @Test
+    fun `a pie tiene mas margen que en transporte`() {
+        val finder = MeetingPointFinder(FakePlaces(emptyList()), FakeMatrix())
+        val auto = Participant("auto", "Auto", at(0.00), TravelMode.DRIVE)
+        val pie = listOf(auto, Participant("x", "X", at(0.1), TravelMode.WALK))
+        val bondi = listOf(auto, Participant("x", "X", at(0.1), TravelMode.TRANSIT))
+        val times = mapOf("auto" to 30.minutes, "x" to 30.minutes)
+        assertEquals(0, finder.rankKey(pie, times).noCarOverSteps)
+        assertEquals(2, finder.rankKey(bondi, times).noCarOverSteps)
     }
 }
