@@ -262,15 +262,17 @@ class MeetingPointFinderTest {
             Participant("a", "Ana", at(0.00), TravelMode.DRIVE),
             Participant("b", "Beto", at(0.02), TravelMode.TRANSIT),
         )
-        val places = listOf(place("en-campana", 0.01), place("capital-oeste", 0.57), place("capital-este", 0.63))
+        // A ±1,1 km del centro de la zona; "en-campana" queda fuera de la zona.
+        val places = listOf(place("en-campana", 0.01), place("capital-oeste", 0.59), place("capital-este", 0.61))
         val search = CirclePlaces(places)
         val zone = SearchArea(at(0.60), radiusMeters = 5_000.0)
         val result = MeetingPointFinder(search, FakeMatrix()).find(friends, PlaceCategory.CAFE, zone = zone)
 
         assertTrue(search.searches.all { Geo.distanceMeters(it.center, zone.center) <= zone.radiusMeters + 1 })
-        assertEquals(setOf("capital-oeste", "capital-este"), result.suggestions.map { it.place.id }.toSet())
-        // Sin topes en zona elegida: gana el de menor peor viaje (el más cercano a Campana).
-        assertEquals("capital-oeste", result.suggestions.first().place.id)
+        val ids = result.suggestions.map { it.place.id }
+        assertTrue("en-campana" !in ids, "no debería sugerir fuera de la zona: $ids")
+        // Gana el más parejo de la zona: el lado más cercano a Campana.
+        assertEquals("capital-oeste", ids.first())
     }
 
     @Test
