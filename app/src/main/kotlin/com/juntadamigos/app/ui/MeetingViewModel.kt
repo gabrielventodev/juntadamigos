@@ -25,34 +25,60 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.util.UUID
-import kotlin.time.Duration.Companion.minutes
 
-/** Una persona en el formulario. La primera es el dueño de la app. */
+/** Una persona ya cargada en la juntada. La primera es el dueño de la app. */
 data class PersonInput(
     val id: String,
     val name: String,
     val isMe: Boolean = false,
+    val resolved: ResolvedAddress,
+    val mode: TravelMode = TravelMode.TRANSIT,
+    /** Posición fija en la paleta friend-1..6: no cambia si se quita a otro. */
+    val colorIndex: Int = 0,
+) {
+    /** Cómo se la nombra en pantalla. */
+    val displayName: String get() = name.ifBlank { if (isMe) "Vos" else "Sin nombre" }
+
+    /** Cómo se la nombra en el mensaje que se comparte con los demás. */
+    val shareName: String get() = name.ifBlank { if (isMe) "Yo" else "Sin nombre" }
+
+    val initial: String get() = displayName.trim().take(1).uppercase()
+}
+
+/** Formulario de "Sumar amigo" (o "Sumarme"), también para editar a alguien. */
+data class PersonDraft(
+    /** null = persona nueva. */
+    val editingId: String?,
+    val isMe: Boolean,
+    val name: String = "",
     val query: String = "",
     val resolved: ResolvedAddress? = null,
     val suggestions: List<AddressSuggestion> = emptyList(),
     val mode: TravelMode = TravelMode.TRANSIT,
+    val colorIndex: Int = 0,
 ) {
-    val displayName: String get() = name.ifBlank { if (isMe) "Yo" else "Sin nombre" }
+    val canSave: Boolean get() = resolved != null && (isMe || name.isNotBlank())
 }
 
+enum class Screen { HOME, PERSON, PLACE_TYPE, LOADING, RESULTS, NO_RESULTS, OFFLINE }
+
 data class MeetingUiState(
-    val people: List<PersonInput>,
+    val people: List<PersonInput> = emptyList(),
+    val draft: PersonDraft? = null,
     val category: PlaceCategory = PlaceCategory.CAFE,
-    val capEnabled: Boolean = false,
-    val capMinutes: Int = 45,
-    val searching: Boolean = false,
+    val screen: Screen = Screen.HOME,
     val result: MeetingResult? = null,
-    /** Pantalla de resultados abierta. Se cierra con atrás y se mantiene el resultado. */
-    val showingResults: Boolean = false,
     val error: String? = null,
     val missingApiKey: Boolean = false,
 ) {
-    val canSearch: Boolean get() = !searching && people.size >= 2 && people.all { it.resolved != null }
+    val me: PersonInput? get() = people.firstOrNull { it.isMe }
+    val canAddFriend: Boolean get() = people.size < MAX_PEOPLE
+    val canChoosePlace: Boolean get() = people.size >= 2
+
+    companion object {
+        /** Tope del diseño ("Hasta 6 personas por juntada"): 6 colores de persona distintos. */
+        const val MAX_PEOPLE = 6
+    }
 }
 
 class MeetingViewModel(
@@ -61,51 +87,73 @@ class MeetingViewModel(
     hasApiKey: Boolean,
 ) : ViewModel() {
 
-    private var nextFriend = 1
-    private val _state = MutableStateFlow(
-        MeetingUiState(
-            people = listOf(PersonInput(id = "me", name = "", isMe = true), newFriend()),
-            missingApiKey = !hasApiKey,
-        ),
-    )
+    private val _state = MutableStateFlow(MeetingUiState(missingApiKey = !hasApiKey))
     val state: StateFlow<MeetingUiState> = _state.asStateFlow()
 
-    /** Un token de sesión de autocompletado por persona; se renueva al elegir una dirección. */
-    private val sessionTokens = mutableMapOf<String, String>()
-    private val suggestJobs = mutableMapOf<String, Job>()
+    /** Token de sesión del autocompletado del formulario; se renueva al elegir una dirección. */
+    private var sessionToken: String? = null
+    private var suggestJob: Job? = null
     private var searchJob: Job? = null
+    private var nextId = 1
 
-    private fun newFriend() = PersonInput(id = "f${nextFriend}", name = "Amigo ${nextFriend++}")
+    private fun token() = sessionToken ?: UUID.randomUUID().toString().also { sessionToken = it }
 
-    private fun token(id: String) = sessionTokens.getOrPut(id) { UUID.randomUUID().toString() }
+    // --- Formulario de persona ---
 
-    private fun updatePerson(id: String, f: (PersonInput) -> PersonInput) =
-        _state.update { s -> s.copy(people = s.people.map { if (it.id == id) f(it) else it }, result = null) }
+    fun startAddMe() = openDraft(PersonDraft(editingId = null, isMe = true, mode = TravelMode.DRIVE, colorIndex = 0))
 
-    fun addFriend() = _state.update { it.copy(people = it.people + newFriend(), result = null) }
-
-    fun removeFriend(id: String) {
-        suggestJobs.remove(id)?.cancel()
-        sessionTokens.remove(id)
-        _state.update { s -> s.copy(people = s.people.filterNot { it.id == id && !it.isMe }, result = null) }
+    fun startAddFriend() {
+        val s = _state.value
+        if (!s.canAddFriend) return
+        val used = s.people.map { it.colorIndex }.toSet()
+        val color = (0 until MeetingUiState.MAX_PEOPLE).first { it !in used }
+        openDraft(PersonDraft(editingId = null, isMe = false, colorIndex = color))
     }
 
-    fun onNameChange(id: String, name: String) = updatePerson(id) { it.copy(name = name) }
+    fun startEdit(id: String) {
+        val p = _state.value.people.firstOrNull { it.id == id } ?: return
+        openDraft(
+            PersonDraft(
+                editingId = p.id, isMe = p.isMe, name = p.name, query = p.resolved.address,
+                resolved = p.resolved, mode = p.mode, colorIndex = p.colorIndex,
+            ),
+        )
+    }
 
-    fun onModeChange(id: String, mode: TravelMode) = updatePerson(id) { it.copy(mode = mode) }
+    private fun openDraft(draft: PersonDraft) {
+        resetAutocomplete()
+        _state.update { it.copy(draft = draft, screen = Screen.PERSON) }
+    }
 
-    fun onQueryChange(id: String, query: String) {
-        updatePerson(id) { it.copy(query = query, resolved = null) }
-        suggestJobs.remove(id)?.cancel()
+    fun closeDraft() {
+        resetAutocomplete()
+        _state.update { it.copy(draft = null, screen = Screen.HOME) }
+    }
+
+    private fun resetAutocomplete() {
+        suggestJob?.cancel()
+        sessionToken = null
+    }
+
+    private fun updateDraft(f: (PersonDraft) -> PersonDraft) =
+        _state.update { s -> s.copy(draft = s.draft?.let(f)) }
+
+    fun onDraftName(name: String) = updateDraft { it.copy(name = name) }
+
+    fun onDraftMode(mode: TravelMode) = updateDraft { it.copy(mode = mode) }
+
+    fun onDraftQuery(query: String) {
+        updateDraft { it.copy(query = query, resolved = null) }
+        suggestJob?.cancel()
         if (query.trim().length < 3) {
-            updatePerson(id) { it.copy(suggestions = emptyList()) }
+            updateDraft { it.copy(suggestions = emptyList()) }
             return
         }
-        suggestJobs[id] = viewModelScope.launch {
+        suggestJob = viewModelScope.launch {
             delay(350) // debounce: no pagar una request por tecla
             try {
-                val list = autocomplete.suggest(query, token(id), bias = groupCenter())
-                updatePerson(id) { if (it.query == query) it.copy(suggestions = list) else it }
+                val list = autocomplete.suggest(query, token(), bias = groupCenter())
+                updateDraft { if (it.query == query) it.copy(suggestions = list) else it }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -114,17 +162,18 @@ class MeetingViewModel(
         }
     }
 
-    fun onSuggestionPicked(id: String, suggestion: AddressSuggestion) {
-        suggestJobs.remove(id)?.cancel()
-        updatePerson(id) { it.copy(query = suggestion.primaryText, suggestions = emptyList()) }
+    fun onDraftSuggestion(suggestion: AddressSuggestion) {
+        suggestJob?.cancel()
+        val label = listOfNotNull(suggestion.primaryText, suggestion.secondaryText).joinToString(", ")
+        updateDraft { it.copy(query = label, suggestions = emptyList()) }
         viewModelScope.launch {
             try {
-                val resolved = autocomplete.resolve(suggestion.placeId, token(id))
-                sessionTokens.remove(id) // la sesión termina con el Place Details
+                val resolved = autocomplete.resolve(suggestion.placeId, token())
+                sessionToken = null // la sesión termina con el Place Details
                 if (resolved == null) {
                     _state.update { it.copy(error = "Google no devolvió coordenadas para esa dirección.") }
                 } else {
-                    updatePerson(id) { it.copy(resolved = resolved) }
+                    updateDraft { if (it.query == label) it.copy(resolved = resolved) else it }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -134,49 +183,89 @@ class MeetingViewModel(
         }
     }
 
-    fun onCategoryChange(category: PlaceCategory) = _state.update { it.copy(category = category, result = null) }
+    fun clearDraftQuery() = onDraftQuery("")
 
-    fun onCapEnabledChange(enabled: Boolean) = _state.update { it.copy(capEnabled = enabled, result = null) }
+    fun saveDraft() {
+        val d = _state.value.draft ?: return
+        val resolved = d.resolved
+        if (resolved == null) {
+            _state.update { it.copy(error = "Elegí la dirección de la lista.") }
+            return
+        }
+        if (!d.canSave) return
+        val person = PersonInput(
+            id = d.editingId ?: if (d.isMe) "me" else "f${nextId++}",
+            name = d.name.trim(),
+            isMe = d.isMe,
+            resolved = resolved,
+            mode = d.mode,
+            colorIndex = d.colorIndex,
+        )
+        resetAutocomplete()
+        _state.update { s ->
+            val people = if (d.editingId == null) {
+                if (person.isMe) listOf(person) + s.people else s.people + person
+            } else {
+                s.people.map { if (it.id == d.editingId) person else it }
+            }
+            s.copy(people = people, draft = null, screen = Screen.HOME, result = null)
+        }
+    }
 
-    fun onCapMinutesChange(minutes: Int) = _state.update { it.copy(capMinutes = minutes, result = null) }
+    fun removeEditing() {
+        val id = _state.value.draft?.editingId ?: return
+        resetAutocomplete()
+        _state.update { s ->
+            s.copy(people = s.people.filterNot { it.id == id && !it.isMe }, draft = null, screen = Screen.HOME, result = null)
+        }
+    }
 
-    fun reopenResults() = _state.update { it.copy(showingResults = it.result != null) }
+    // --- Tipo de lugar y búsqueda ---
 
-    fun closeResults() = _state.update { it.copy(showingResults = false) }
+    fun choosePlace() = _state.update { if (it.canChoosePlace) it.copy(screen = Screen.PLACE_TYPE) else it }
+
+    fun onCategoryChange(category: PlaceCategory) =
+        _state.update { it.copy(category = category, result = if (category == it.category) it.result else null) }
+
+    fun goHome() = _state.update { it.copy(screen = Screen.HOME) }
+
+    fun backToPlaceType() {
+        searchJob?.cancel()
+        _state.update { it.copy(screen = Screen.PLACE_TYPE) }
+    }
 
     fun dismissError() = _state.update { it.copy(error = null) }
 
     fun search() {
         val s = _state.value
-        val missing = s.people.firstOrNull { it.resolved == null }
-        if (missing != null) {
-            _state.update { it.copy(error = "Falta elegir la dirección de ${missing.displayName} de la lista.") }
+        if (!s.canChoosePlace) return
+        // Si ya hay resultado para esta juntada y este tipo, no se vuelve a pagar la búsqueda.
+        if (s.result != null) {
+            _state.update { it.copy(screen = screenFor(s.result)) }
             return
         }
-        if (s.people.size < 2) return
-        val participants = s.people.map { p ->
-            Participant(p.id, p.displayName, p.resolved!!.location, p.mode)
-        }
+        val participants = s.people.map { p -> Participant(p.id, p.shareName, p.resolved.location, p.mode) }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            _state.update { it.copy(searching = true, error = null, result = null, showingResults = false) }
+            _state.update { it.copy(screen = Screen.LOADING, error = null, result = null) }
             try {
-                val result = finder.find(
-                    participants = participants,
-                    category = s.category,
-                    maxIndividualTravel = if (s.capEnabled) s.capMinutes.minutes else null,
-                )
-                _state.update { it.copy(searching = false, result = result, showingResults = true) }
+                val result = finder.find(participants = participants, category = s.category)
+                _state.update { it.copy(result = result, screen = screenFor(result)) }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: IOException) {
+                _state.update { it.copy(screen = Screen.OFFLINE) }
             } catch (e: Exception) {
-                _state.update { it.copy(searching = false, error = describe(e)) }
+                _state.update { it.copy(screen = Screen.PLACE_TYPE, error = describe(e)) }
             }
         }
     }
 
+    private fun screenFor(result: MeetingResult) =
+        if (result.suggestions.isEmpty()) Screen.NO_RESULTS else Screen.RESULTS
+
     /** Sesgo del autocompletado: el centro de las direcciones ya cargadas. */
-    private fun groupCenter() = _state.value.people.mapNotNull { it.resolved?.location }
+    private fun groupCenter() = _state.value.people.map { it.resolved.location }
         .takeIf { it.isNotEmpty() }
         ?.let(Geo::centroid)
 
