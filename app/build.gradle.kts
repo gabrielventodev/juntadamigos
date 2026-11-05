@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -7,20 +8,50 @@ plugins {
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
 }
 
+// Firma de release (upload key). Nunca en el repo: se lee de keystore.properties en la raíz
+// (ignorado por git) o de variables de entorno. Sin ellas, bundleRelease genera un AAB sin firmar
+// (sirve para que CI verifique R8, no para subir a Play).
+val releaseSigning: Map<String, String>? = run {
+    val file = rootProject.file("keystore.properties")
+    val props = Properties().apply { if (file.exists()) file.inputStream().use(::load) }
+    fun value(key: String, env: String) = props.getProperty(key) ?: System.getenv(env)
+    val values = mapOf(
+        "storeFile" to value("storeFile", "JUNTADAMIGOS_STORE_FILE"),
+        "storePassword" to value("storePassword", "JUNTADAMIGOS_STORE_PASSWORD"),
+        "keyAlias" to value("keyAlias", "JUNTADAMIGOS_KEY_ALIAS"),
+        "keyPassword" to value("keyPassword", "JUNTADAMIGOS_KEY_PASSWORD"),
+    )
+    if (values.values.all { !it.isNullOrBlank() }) values.mapValues { it.value!! } else null
+}
+
 android {
     namespace = "com.juntadamigos.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.juntadamigos.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        targetSdk = 36
+        // Play rechaza un versionCode repetido: subilo en cada AAB (o pasalo con -PversionCode=N).
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("versionName") as String?) ?: "1.0.0"
+    }
+
+    signingConfigs {
+        if (releaseSigning != null) {
+            create("release") {
+                storeFile = rootProject.file(releaseSigning.getValue("storeFile"))
+                storePassword = releaseSigning.getValue("storePassword")
+                keyAlias = releaseSigning.getValue("keyAlias")
+                keyPassword = releaseSigning.getValue("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (releaseSigning != null) signingConfig = signingConfigs.getByName("release")
+            isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

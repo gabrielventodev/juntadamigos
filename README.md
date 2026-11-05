@@ -7,7 +7,7 @@ App Android (Kotlin) que sugiere un lugar real de encuentro para 2 o más amigos
 - [x] **Paso 1: motor de cálculo** (`core/`, Kotlin puro, sin Android)
 - [x] **Paso 2: app Android MVP** (`app/`, Jetpack Compose)
 - [x] **Paso 3: pantalla de resultados**: mapa con amigos y top 3, tiempo por persona, abrir en Google Maps y compartir por WhatsApp
-- [ ] Paso 4: publicación en Play Store
+- [ ] **Paso 4: publicación en Play Store**: firma de release y AAB listos en el repo; guía de lo que falta en [docs/publicacion-play-store.md](docs/publicacion-play-store.md)
 
 ## Cómo decide el lugar
 
@@ -60,7 +60,7 @@ Costo: con 4 amigos son ~130 elementos de matriz por búsqueda. El tráfico en t
 
 ## Desarrollo
 
-Requiere JDK 17+ y Android SDK (API 35).
+Requiere JDK 17+ y Android SDK (API 36).
 
 ```bash
 ./gradlew :core:test            # tests del motor (con mocks)
@@ -77,4 +77,12 @@ Requiere JDK 17+ y Android SDK (API 35).
 LIVE_GOOGLE_TESTS=1 GOOGLE_MAPS_API_KEY=... ./gradlew :core:test --tests '*LiveGoogleSmokeTest*' -i
 ```
 
-CI (GitHub Actions) corre los tests del motor y compila el APK de debug en cada push y PR.
+CI (GitHub Actions) corre los tests del motor, compila el APK de debug y el AAB de release (sin firmar, para verificar R8) en cada push y PR.
+
+### Release
+
+```bash
+./gradlew :app:bundleRelease -PversionCode=N -PversionName=X.Y.Z
+```
+
+La firma sale de `keystore.properties` (no se commitea) o de variables de entorno. Detalle en [docs/publicacion-play-store.md](docs/publicacion-play-store.md).
