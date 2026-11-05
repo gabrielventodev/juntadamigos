@@ -50,7 +50,11 @@ fun MeetingScreen(viewModel: MeetingViewModel) {
         Box(Modifier.fillMaxSize()) {
             if (state.screen == Screen.RESULTS && result != null) {
                 // El mapa va de borde a borde: la pantalla maneja sus propios insets.
-                ResultsScreen(result, state.people, state.category, onBack = viewModel::backToPlaceType)
+                ResultsScreen(
+                    result, state.people, state.category,
+                    zoneLabel = state.zoneLabel?.takeIf { state.inZone },
+                    onBack = viewModel::backToPlaceType,
+                )
             } else {
                 Box(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                     when (state.screen) {
@@ -78,6 +82,10 @@ fun MeetingScreen(viewModel: MeetingViewModel) {
                             state = state,
                             onBack = viewModel::goHome,
                             onCategory = viewModel::onCategoryChange,
+                            onZoneEnabled = viewModel::onZoneEnabled,
+                            onZoneQuery = viewModel::onZoneQuery,
+                            onZonePick = viewModel::onZonePick,
+                            onZoneClear = viewModel::clearZone,
                             onSearch = viewModel::search,
                         )
                         Screen.LOADING -> LoadingScreen(state, onCancel = viewModel::backToPlaceType)

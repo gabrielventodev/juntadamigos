@@ -136,7 +136,7 @@ private fun Field(label: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+internal fun fieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
     unfocusedBorderColor = MaterialTheme.colorScheme.outline,
@@ -144,7 +144,7 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-private fun Suggestions(list: List<AddressSuggestion>, onPick: (AddressSuggestion) -> Unit) {
+internal fun Suggestions(list: List<AddressSuggestion>, onPick: (AddressSuggestion) -> Unit) {
     Surface(
         modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),

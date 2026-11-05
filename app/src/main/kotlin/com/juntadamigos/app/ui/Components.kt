@@ -234,10 +234,10 @@ fun evennessLabel(e: Evenness) = when (e) {
  * sin auto, y rayas de error si lo supera.
  */
 @Composable
-fun TimeBar(person: PersonInput, time: Duration, scaleMinutes: Long) {
+fun TimeBar(person: PersonInput, time: Duration, scaleMinutes: Long, showCap: Boolean = true) {
     val cs = MaterialTheme.colorScheme
     val minutes = time.roundedMinutes()
-    val cap = capFor(person.mode)?.roundedMinutes()
+    val cap = if (showCap) capFor(person.mode)?.roundedMinutes() else null
     val over = cap != null && minutes > cap
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         AvatarWithMode(person, 28.dp)
