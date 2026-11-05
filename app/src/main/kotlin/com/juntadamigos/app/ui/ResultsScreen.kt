@@ -91,8 +91,11 @@ fun ResultsScreen(
     result: MeetingResult,
     people: List<PersonInput>,
     category: PlaceCategory,
+    /** Zona elegida ("Palermo"); null = se buscó en el medio. Sin topes sin auto si hay zona. */
+    zoneLabel: String?,
     onBack: () -> Unit,
 ) {
+    val caps = zoneLabel == null
     val context = LocalContext.current
     val shareNames = remember(people) { people.associate { it.id to it.shareName } }
     var selected by rememberSaveable(result) { mutableIntStateOf(0) }
@@ -140,7 +143,9 @@ fun ResultsScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "${categoryPlural(category)} para ${groupLabel(people.size)}",
+                    if (zoneLabel != null) "${categoryPlural(category)} en $zoneLabel" else "${categoryPlural(category)} para ${groupLabel(people.size)}",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     fontFamily = Display,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
@@ -184,11 +189,12 @@ fun ResultsScreen(
                             s = s,
                             people = people,
                             category = category,
+                            caps = caps,
                             onOpenMaps = { openUrl(context, MeetingShare.mapsUrl(s.place)) },
                             onShare = { shareOnWhatsApp(context, MeetingShare.message(s, shareNames)) },
                         )
                     } else {
-                        CompactPlaceCard(rank = i + 1, s = s, people = people, onClick = { focusPlace(i) })
+                        CompactPlaceCard(rank = i + 1, s = s, people = people, caps = caps, onClick = { focusPlace(i) })
                     }
                 }
                 item { Summary(result) }
@@ -213,11 +219,12 @@ private fun SelectedPlaceCard(
     s: Suggestion,
     people: List<PersonInput>,
     category: PlaceCategory,
+    caps: Boolean,
     onOpenMaps: () -> Unit,
     onShare: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    val fairness = fairnessOf(s, people)
+    val fairness = fairnessOf(s, people, caps)
     val maxMinutes = s.travelTimes.values.maxOfOrNull { it.roundedMinutes() } ?: 0
     val scale = maxOf(45L, (maxMinutes + 4) / 5 * 5)
     AppCard(Modifier.fillMaxWidth(), border = BorderStroke(2.dp, cs.tertiary)) {
@@ -238,12 +245,12 @@ private fun SelectedPlaceCard(
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                people.forEach { p -> s.travelTimes[p.id]?.let { TimeBar(p, it, scale) } }
+                people.forEach { p -> s.travelTimes[p.id]?.let { TimeBar(p, it, scale, showCap = caps) } }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 EvennessPill(fairness.evenness, "${evennessLabel(fairness.evenness)} · ${fairness.spreadMinutes} min de diferencia")
                 Box(Modifier.weight(1f))
-                if (people.any { capFor(it.mode) != null }) {
+                if (caps && people.any { capFor(it.mode) != null }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Box(Modifier.width(2.dp).height(12.dp).clip(RoundedCornerShape(4.dp)).background(cs.onSurfaceVariant))
                         Text("tope", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
@@ -268,8 +275,8 @@ private fun SelectedPlaceCard(
 }
 
 @Composable
-private fun CompactPlaceCard(rank: Int, s: Suggestion, people: List<PersonInput>, onClick: () -> Unit) {
-    val fairness = fairnessOf(s, people)
+private fun CompactPlaceCard(rank: Int, s: Suggestion, people: List<PersonInput>, caps: Boolean, onClick: () -> Unit) {
+    val fairness = fairnessOf(s, people, caps)
     val label = "${s.place.name}, lugar $rank, ${evennessLabel(fairness.evenness).lowercase()}, ${fairness.spreadMinutes} minutos de diferencia"
     AppCard(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label }) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

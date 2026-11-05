@@ -13,6 +13,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class GooglePlaceAutocompleteTest {
     private lateinit var server: MockWebServer
@@ -73,6 +74,15 @@ class GooglePlaceAutocompleteTest {
         assertEquals("tok-1", req.requestUrl!!.queryParameter("sessionToken"))
         assertEquals("KEY", req.getHeader("X-Goog-Api-Key"))
         assertEquals(GooglePlaceAutocomplete.DETAILS_FIELD_MASK, req.getHeader("X-Goog-FieldMask"))
+    }
+
+    @Test
+    fun `detalles con viewport calcula el radio del area`() {
+        // Viewport de ~0.2° de lado alrededor del ecuador: diagonal ≈ 31,4 km, radio ≈ 15,7 km.
+        val r = GooglePlaceAutocomplete.parseDetailsResponse(
+            """{"id":"caba","location":{"latitude":0.0,"longitude":0.0},"viewport":{"low":{"latitude":-0.1,"longitude":-0.1},"high":{"latitude":0.1,"longitude":0.1}}}""",
+        )!!
+        assertTrue(r.areaRadiusMeters!! in 15_000.0..16_500.0, "radio ${r.areaRadiusMeters}")
     }
 
     @Test

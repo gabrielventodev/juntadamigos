@@ -2,6 +2,7 @@ package com.juntadamigos.core.google
 
 import com.juntadamigos.core.AddressAutocomplete
 import com.juntadamigos.core.AddressSuggestion
+import com.juntadamigos.core.Geo
 import com.juntadamigos.core.LatLng
 import com.juntadamigos.core.ResolvedAddress
 import kotlinx.serialization.Serializable
@@ -62,7 +63,7 @@ class GooglePlaceAutocomplete(
             "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat"
 
         // Solo campos del SKU "Essentials" de Place Details.
-        const val DETAILS_FIELD_MASK = "id,formattedAddress,location"
+        const val DETAILS_FIELD_MASK = "id,formattedAddress,location,viewport"
 
         internal fun parseAutocompleteResponse(text: String): List<AddressSuggestion> =
             googleJson.decodeFromString<AutocompleteResponse>(text).suggestions.mapNotNull { s ->
@@ -74,7 +75,10 @@ class GooglePlaceAutocomplete(
         internal fun parseDetailsResponse(text: String): ResolvedAddress? {
             val d = googleJson.decodeFromString<DetailsResponse>(text)
             val loc = d.location ?: return null
-            return ResolvedAddress(d.id, d.formattedAddress ?: d.id, LatLng(loc.latitude, loc.longitude))
+            val radius = d.viewport?.let { v ->
+                Geo.distanceMeters(LatLng(v.low.latitude, v.low.longitude), LatLng(v.high.latitude, v.high.longitude)) / 2
+            }
+            return ResolvedAddress(d.id, d.formattedAddress ?: d.id, LatLng(loc.latitude, loc.longitude), radius)
         }
     }
 
@@ -123,5 +127,9 @@ class GooglePlaceAutocomplete(
         val id: String,
         val formattedAddress: String? = null,
         val location: LatLngJson? = null,
+        val viewport: Viewport? = null,
     )
+
+    @Serializable
+    internal data class Viewport(val low: LatLngJson, val high: LatLngJson)
 }

@@ -53,4 +53,11 @@ object Geo {
             a.longitude + (b.longitude - a.longitude) * t,
         )
     }
+
+    /** Punto a [eastMeters] al este y [northMeters] al norte de [p] (aproximación plana, escala ciudad). */
+    fun offset(p: LatLng, eastMeters: Double, northMeters: Double): LatLng {
+        val dLat = Math.toDegrees(northMeters / EARTH_RADIUS_METERS)
+        val dLon = Math.toDegrees(eastMeters / (EARTH_RADIUS_METERS * cos(Math.toRadians(p.latitude))))
+        return LatLng((p.latitude + dLat).coerceIn(-90.0, 90.0), ((p.longitude + dLon + 540.0) % 360.0) - 180.0)
+    }
 }

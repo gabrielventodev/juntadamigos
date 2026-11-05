@@ -13,6 +13,7 @@ import com.juntadamigos.core.MeetingResult
 import com.juntadamigos.core.Participant
 import com.juntadamigos.core.PlaceCategory
 import com.juntadamigos.core.ResolvedAddress
+import com.juntadamigos.core.SearchArea
 import com.juntadamigos.core.TravelMode
 import com.juntadamigos.core.google.GoogleApiException
 import kotlinx.coroutines.CancellationException
@@ -70,7 +71,18 @@ data class MeetingUiState(
     val result: MeetingResult? = null,
     val error: String? = null,
     val missingApiKey: Boolean = false,
+    /** Zona elegida por el grupo ("Capital", "Palermo"). Apagado = buscar en el medio. */
+    val zoneEnabled: Boolean = false,
+    val zoneQuery: String = "",
+    val zoneSuggestions: List<AddressSuggestion> = emptyList(),
+    val zone: ResolvedAddress? = null,
+    /** Nombre corto de la zona para títulos ("Palermo"), de la sugerencia elegida. */
+    val zoneLabel: String? = null,
 ) {
+    /** El resultado (o la búsqueda) es en una zona elegida: sin topes sin auto. */
+    val inZone: Boolean get() = zoneEnabled && zone != null
+    val canSearch: Boolean get() = canChoosePlace && (!zoneEnabled || zone != null)
+
     val me: PersonInput? get() = people.firstOrNull { it.isMe }
     val canAddFriend: Boolean get() = people.size < MAX_PEOPLE
     val canChoosePlace: Boolean get() = people.size >= 2
@@ -95,6 +107,8 @@ class MeetingViewModel(
     private var suggestJob: Job? = null
     private var searchJob: Job? = null
     private var nextId = 1
+    private var zoneToken: String? = null
+    private var zoneJob: Job? = null
 
     private fun token() = sessionToken ?: UUID.randomUUID().toString().also { sessionToken = it }
 
@@ -227,6 +241,60 @@ class MeetingViewModel(
     fun onCategoryChange(category: PlaceCategory) =
         _state.update { it.copy(category = category, result = if (category == it.category) it.result else null) }
 
+    // --- Zona de encuentro ---
+
+    fun onZoneEnabled(enabled: Boolean) = _state.update {
+        if (it.zoneEnabled == enabled) it else it.copy(zoneEnabled = enabled, result = null)
+    }
+
+    fun onZoneQuery(query: String) {
+        _state.update { it.copy(zoneQuery = query, zone = null, zoneLabel = null, result = null) }
+        zoneJob?.cancel()
+        if (query.trim().length < 3) {
+            _state.update { it.copy(zoneSuggestions = emptyList()) }
+            return
+        }
+        zoneJob = viewModelScope.launch {
+            delay(350)
+            try {
+                // Sin sesgo: la zona puede quedar lejos de todos (viven en Campana, van a Capital).
+                val token = zoneToken ?: UUID.randomUUID().toString().also { zoneToken = it }
+                val list = autocomplete.suggest(query, token, bias = null)
+                _state.update { if (it.zoneQuery == query) it.copy(zoneSuggestions = list) else it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(error = describe(e)) }
+            }
+        }
+    }
+
+    fun onZonePick(suggestion: AddressSuggestion) {
+        zoneJob?.cancel()
+        val label = listOfNotNull(suggestion.primaryText, suggestion.secondaryText).joinToString(", ")
+        _state.update { it.copy(zoneQuery = label, zoneSuggestions = emptyList()) }
+        viewModelScope.launch {
+            try {
+                val token = zoneToken ?: UUID.randomUUID().toString()
+                val resolved = autocomplete.resolve(suggestion.placeId, token)
+                zoneToken = null
+                if (resolved == null) {
+                    _state.update { it.copy(error = "Google no devolvió coordenadas para esa zona.") }
+                } else {
+                    _state.update {
+                        if (it.zoneQuery == label) it.copy(zone = resolved, zoneLabel = suggestion.primaryText, result = null) else it
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(error = describe(e)) }
+            }
+        }
+    }
+
+    fun clearZone() = onZoneQuery("")
+
     fun goHome() = _state.update { it.copy(screen = Screen.HOME) }
 
     fun backToPlaceType() {
@@ -239,6 +307,10 @@ class MeetingViewModel(
     fun search() {
         val s = _state.value
         if (!s.canChoosePlace) return
+        if (s.zoneEnabled && s.zone == null) {
+            _state.update { it.copy(error = "Elegí la zona de la lista.") }
+            return
+        }
         // Si ya hay resultado para esta juntada y este tipo, no se vuelve a pagar la búsqueda.
         if (s.result != null) {
             _state.update { it.copy(screen = screenFor(s.result)) }
@@ -249,7 +321,11 @@ class MeetingViewModel(
         searchJob = viewModelScope.launch {
             _state.update { it.copy(screen = Screen.LOADING, error = null, result = null) }
             try {
-                val result = finder.find(participants = participants, category = s.category)
+                val zone = s.zone?.takeIf { s.zoneEnabled }?.let {
+                    // Sin viewport (p. ej. una dirección puntual): un radio de barrio.
+                    SearchArea(it.location, it.areaRadiusMeters ?: DEFAULT_ZONE_RADIUS_METERS)
+                }
+                val result = finder.find(participants = participants, category = s.category, zone = zone)
                 _state.update { it.copy(result = result, screen = screenFor(result)) }
             } catch (e: CancellationException) {
                 throw e
@@ -281,6 +357,8 @@ class MeetingViewModel(
     }
 
     companion object {
+        private const val DEFAULT_ZONE_RADIUS_METERS = 2_000.0
+
         fun factory(
             autocomplete: AddressAutocomplete,
             finder: MeetingPointFinder,

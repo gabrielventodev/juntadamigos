@@ -41,6 +41,8 @@ data class ResolvedAddress(
     val placeId: String,
     val address: String,
     val location: LatLng,
+    /** Radio aproximado del área que cubre (mitad de la diagonal del viewport). Sirve para zonas como "CABA". */
+    val areaRadiusMeters: Double? = null,
 )
 
 /**

@@ -27,6 +27,11 @@ import kotlin.time.Duration.Companion.minutes
  * 5. Descarta candidatos donde alguien no tiene ruta o donde alguien supera el tope individual.
  * 6. Ordena con el criterio de arriba.
  *
+ * Con [find]`(zone = ...)` el grupo elige dónde juntarse (p. ej. viven en Campana y quieren ir
+ * a Capital): se muestrea solo dentro de esa zona y no se aplican los topes sin auto, que miden
+ * "juntarse en el medio" y en un viaje largo elegido a propósito los superaría todo el mundo.
+ * Gana el lugar de la zona con menor peor viaje (el más parejo), desempata el total.
+ *
  * Historia: "menor tiempo total" dejaba al de auto en 1 h y al de colectivo en 5 min (o al
  * revés, según dónde se buscaba). Probado en el celular de Gabriel: Jose a pie 4 min,
  * Gabriel en auto 51 min. De ahí el criterio parejo con tope para el que va sin auto.
@@ -79,13 +84,22 @@ class MeetingPointFinder(
         /** Tope opcional: ningún participante puede viajar más que esto. */
         maxIndividualTravel: Duration? = null,
         topN: Int = 3,
+        /** Zona elegida por el grupo (centro + radio). null = buscar en el medio. */
+        zone: SearchArea? = null,
     ): MeetingResult {
         require(participants.size >= 2) { "Se necesitan al menos 2 participantes" }
         require(participants.map { it.id }.toSet().size == participants.size) { "Ids de participantes repetidos" }
 
-        val center = Geo.centroid(participants.map { it.location })
-        val radius = searchRadius(center, participants)
-        val areas = bestAreas(participants, center, radius, maxIndividualTravel)
+        val caps = zone == null
+        val areas = if (zone == null) {
+            val center = Geo.centroid(participants.map { it.location })
+            val radius = searchRadius(center, participants)
+            bestAreas(participants, center, radius, samplePoints(center, participants), maxIndividualTravel, caps)
+        } else {
+            val r = zone.radiusMeters.coerceIn(config.minRadiusMeters, config.maxRadiusMeters)
+            val subRadius = (r / 3).coerceIn(config.minRadiusMeters, r)
+            bestAreas(participants, zone.center, subRadius, zoneSamplePoints(zone.center, r), maxIndividualTravel, caps)
+        }
         val perArea = (config.maxCandidates + areas.size - 1) / areas.size
         val candidates = coroutineScope {
             areas.map { a -> async { placeSearch.searchNearby(a.center, a.radiusMeters, category, perArea) } }
@@ -121,7 +135,7 @@ class MeetingPointFinder(
         }
 
         val ranked = suggestions.sortedWith(
-            compareBy<Suggestion> { rankKey(participants, it.travelTimes) }
+            compareBy<Suggestion> { rankKey(participants, it.travelTimes, caps) }
                 .thenByDescending { it.place.rating ?: 0.0 },
         )
 
@@ -140,8 +154,8 @@ class MeetingPointFinder(
             compareValuesBy(this, other, { it.noCarOverSteps }, { it.maxMinutes }, { it.totalSeconds })
     }
 
-    internal fun rankKey(participants: List<Participant>, times: Map<String, Duration>): RankKey {
-        val over = participants.filter { it.mode != TravelMode.DRIVE }
+    internal fun rankKey(participants: List<Participant>, times: Map<String, Duration>, noCarCaps: Boolean = true): RankKey {
+        val over = participants.filter { noCarCaps && it.mode != TravelMode.DRIVE }
             .maxOfOrNull { times.getValue(it.id) - config.noCarMaxTravel.getValue(it.mode) } ?: Duration.ZERO
         val steps = if (!over.isPositive()) 0L else
             (over.inWholeSeconds + config.noCarFallbackStep.inWholeSeconds - 1) / config.noCarFallbackStep.inWholeSeconds
@@ -165,6 +179,18 @@ class MeetingPointFinder(
     }
 
     /**
+     * Puntos de muestra dentro de una zona elegida: el centro y dos anillos (a 1/3 y 2/3 del
+     * radio, 6 puntos cada uno), para no quedarse solo con el centro de una ciudad grande.
+     */
+    internal fun zoneSamplePoints(center: LatLng, radiusMeters: Double): List<LatLng> =
+        listOf(center) + listOf(1.0 / 3, 2.0 / 3).flatMap { f ->
+            (0 until 6).map { k ->
+                val a = Math.toRadians(60.0 * k + if (f > 0.5) 30.0 else 0.0)
+                Geo.offset(center, radiusMeters * f * kotlin.math.cos(a), radiusMeters * f * kotlin.math.sin(a))
+            }
+        }
+
+    /**
      * Mide tiempos reales a los puntos de muestra y devuelve las mejores zonas, separadas
      * entre sí al menos un radio. Si ningún punto tiene ruta para todos, busca en el centro.
      */
@@ -172,15 +198,16 @@ class MeetingPointFinder(
         participants: List<Participant>,
         center: LatLng,
         radius: Double,
+        samples: List<LatLng>,
         maxIndividualTravel: Duration?,
+        noCarCaps: Boolean,
     ): List<SearchArea> {
-        val samples = samplePoints(center, participants)
         val times = travelTimesByParticipant(participants, samples)
         val scored = samples.indices.mapNotNull { j ->
             val perPerson = participants.associate { p -> p.id to (times.getValue(p.id)[j] ?: return@mapNotNull null) }
             // Con tope individual, preferir zonas que lo cumplen; las demás quedan como último recurso.
             val overCap = maxIndividualTravel != null && perPerson.values.max() > maxIndividualTravel
-            Triple(samples[j], overCap, rankKey(participants, perPerson))
+            Triple(samples[j], overCap, rankKey(participants, perPerson, noCarCaps))
         }.sortedWith(compareBy<Triple<LatLng, Boolean, RankKey>> { it.second }.thenBy { it.third })
 
         val chosen = mutableListOf<LatLng>()

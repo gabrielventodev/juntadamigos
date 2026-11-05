@@ -25,14 +25,17 @@ fun capFor(mode: TravelMode): Duration? = NoCarCaps[mode]
 
 fun Duration.roundedMinutes(): Long = (inWholeSeconds + 30) / 60
 
-fun fairnessOf(s: Suggestion, people: List<PersonInput>): Fairness =
-    fairnessOf(s, people.associate { it.id to it.mode })
+fun fairnessOf(s: Suggestion, people: List<PersonInput>, caps: Boolean = true): Fairness =
+    fairnessOf(s, people.associate { it.id to it.mode }, caps)
 
-/** [modes]: modo de viaje por id de persona. */
-fun fairnessOf(s: Suggestion, modes: Map<String, TravelMode>): Fairness {
+/**
+ * [modes]: modo de viaje por id de persona. [caps] = false en zona elegida: el motor no aplica
+ * los topes sin auto ahí, así que tampoco se marcan como superados.
+ */
+fun fairnessOf(s: Suggestion, modes: Map<String, TravelMode>, caps: Boolean = true): Fairness {
     val minutes = s.travelTimes.values.map { it.roundedMinutes() }
     val spread = (minutes.maxOrNull() ?: 0) - (minutes.minOrNull() ?: 0)
-    val over = modes.mapNotNull { (id, mode) ->
+    val over = if (!caps) emptyList() else modes.mapNotNull { (id, mode) ->
         val cap = capFor(mode) ?: return@mapNotNull null
         val t = s.travelTimes[id] ?: return@mapNotNull null
         if (t > cap) OverCap(id, t.roundedMinutes(), cap.roundedMinutes()) else null

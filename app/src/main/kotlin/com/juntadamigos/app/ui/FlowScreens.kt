@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -37,13 +40,23 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.juntadamigos.core.AddressSuggestion
 import com.juntadamigos.core.PlaceCategory
 
 // --- 3 · Tipo de lugar ---
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PlaceTypeScreen(state: MeetingUiState, onBack: () -> Unit, onCategory: (PlaceCategory) -> Unit, onSearch: () -> Unit) {
+fun PlaceTypeScreen(
+    state: MeetingUiState,
+    onBack: () -> Unit,
+    onCategory: (PlaceCategory) -> Unit,
+    onZoneEnabled: (Boolean) -> Unit,
+    onZoneQuery: (String) -> Unit,
+    onZonePick: (AddressSuggestion) -> Unit,
+    onZoneClear: () -> Unit,
+    onSearch: () -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
     Column(Modifier.fillMaxSize()) {
         BackBar(onBack)
@@ -51,7 +64,11 @@ fun PlaceTypeScreen(state: MeetingUiState, onBack: () -> Unit, onCategory: (Plac
             Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Text("¿Qué plan armamos?", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "Buscamos lugares que queden parejos para ${groupLabel(state.people.size)}.",
+                    if (state.zoneEnabled && state.zoneLabel != null) {
+                        "Buscamos en ${state.zoneLabel} el lugar más parejo para ${groupLabel(state.people.size)}."
+                    } else {
+                        "Buscamos lugares que queden parejos para ${groupLabel(state.people.size)}."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -74,17 +91,25 @@ fun PlaceTypeScreen(state: MeetingUiState, onBack: () -> Unit, onCategory: (Plac
                     }
                 }
             }
+            Text("¿Dónde?", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 20.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceOption(AppIcons.Pin, "En el medio", "Lo más parejo para todos", selected = !state.zoneEnabled) { onZoneEnabled(false) }
+                ChoiceOption(AppIcons.Search, "En una zona", "Una ciudad o barrio, aunque quede lejos", selected = state.zoneEnabled) { onZoneEnabled(true) }
+                if (state.zoneEnabled) ZoneField(state, onZoneQuery, onZonePick, onZoneClear)
+            }
             Text("Tipo de lugar", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
             Column(Modifier.padding(horizontal = 16.dp).selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlaceCategory.entries.forEach { c -> CategoryOption(c, selected = c == state.category) { onCategory(c) } }
+                PlaceCategory.entries.forEach { c ->
+                    ChoiceOption(AppIcons.category(c), categoryLabel(c), categoryHint(c), selected = c == state.category) { onCategory(c) }
+                }
             }
         }
-        BottomActions { PrimaryButton("Buscar lugar", onSearch, leading = AppIcons.Search) }
+        BottomActions { PrimaryButton("Buscar lugar", onSearch, enabled = state.canSearch, leading = AppIcons.Search) }
     }
 }
 
 @Composable
-private fun CategoryOption(c: PlaceCategory, selected: Boolean, onClick: () -> Unit) {
+private fun ChoiceOption(icon: ImageVector, title: String, hint: String, selected: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(16.dp)
     Row(
@@ -100,17 +125,17 @@ private fun CategoryOption(c: PlaceCategory, selected: Boolean, onClick: () -> U
             Modifier.size(40.dp).clip(CircleShape).background(if (selected) cs.surfaceContainerLowest else cs.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(AppIcons.category(c), contentDescription = null, tint = if (selected) cs.primary else cs.onSurface)
+            Icon(icon, contentDescription = null, tint = if (selected) cs.primary else cs.onSurface)
         }
         Column(Modifier.weight(1f)) {
             Text(
-                categoryLabel(c),
+                title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                 color = if (selected) cs.onPrimaryContainer else cs.onSurface,
             )
             Text(
-                categoryHint(c),
+                hint,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
             )
@@ -120,6 +145,39 @@ private fun CategoryOption(c: PlaceCategory, selected: Boolean, onClick: () -> U
                 Icon(AppIcons.Check, contentDescription = null, tint = cs.onPrimary, modifier = Modifier.size(16.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ZoneField(state: MeetingUiState, onQuery: (String) -> Unit, onPick: (AddressSuggestion) -> Unit, onClear: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column {
+        OutlinedTextField(
+            value = state.zoneQuery,
+            onValueChange = onQuery,
+            singleLine = true,
+            placeholder = { Text("Ej.: Capital Federal, Palermo") },
+            leadingIcon = { Icon(AppIcons.Search, contentDescription = null, tint = cs.onSurfaceVariant) },
+            trailingIcon = {
+                when {
+                    state.zone != null -> Icon(AppIcons.Check, contentDescription = "Zona confirmada", tint = cs.primary)
+                    state.zoneQuery.isNotEmpty() -> IconButton(onClick = onClear) {
+                        Icon(AppIcons.Close, contentDescription = "Borrar zona", tint = cs.onSurfaceVariant)
+                    }
+                }
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = fieldColors(),
+            textStyle = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (state.zoneSuggestions.isNotEmpty()) Suggestions(state.zoneSuggestions, onPick)
+        Text(
+            if (state.zone == null) "Elegí una opción de la lista." else "Sin topes de viaje: gana el lugar de la zona al que todos llegan más parejo.",
+            style = MaterialTheme.typography.bodySmall,
+            color = cs.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+        )
     }
 }
 
@@ -213,10 +271,11 @@ fun NoResultsScreen(state: MeetingUiState, onBack: () -> Unit, onOtherType: () -
 private fun noResultsReason(state: MeetingUiState): String {
     val plural = categoryPlural(state.category).lowercase()
     val r = state.result
+    val where = state.zoneLabel?.takeIf { state.inZone }
     return if (r != null && r.discardedUnreachable > 0) {
         "Hay $plural cerca, pero alguien no tiene cómo llegar (por ejemplo, sin transporte a esa hora)."
     } else {
-        "Google no encontró $plural entre ${groupLabel(state.people.size)}."
+        if (where != null) "Google no encontró $plural en $where." else "Google no encontró $plural entre ${groupLabel(state.people.size)}."
     }
 }
 

@@ -256,6 +256,36 @@ class MeetingPointFinderTest {
     }
 
     @Test
+    fun `con zona elegida busca solo dentro de la zona aunque quede lejos de todos`() = runTest {
+        // Viven en "Campana" (0.00 y 0.02) y quieren juntarse en "Capital" (alrededor de 0.60).
+        val friends = listOf(
+            Participant("a", "Ana", at(0.00), TravelMode.DRIVE),
+            Participant("b", "Beto", at(0.02), TravelMode.TRANSIT),
+        )
+        // A ±1,1 km del centro de la zona; "en-campana" queda fuera de la zona.
+        val places = listOf(place("en-campana", 0.01), place("capital-oeste", 0.59), place("capital-este", 0.61))
+        val search = CirclePlaces(places)
+        val zone = SearchArea(at(0.60), radiusMeters = 5_000.0)
+        val result = MeetingPointFinder(search, FakeMatrix()).find(friends, PlaceCategory.CAFE, zone = zone)
+
+        assertTrue(search.searches.all { Geo.distanceMeters(it.center, zone.center) <= zone.radiusMeters + 1 })
+        val ids = result.suggestions.map { it.place.id }
+        assertTrue("en-campana" !in ids, "no debería sugerir fuera de la zona: $ids")
+        // Gana el más parejo de la zona: el lado más cercano a Campana.
+        assertEquals("capital-oeste", ids.first())
+    }
+
+    @Test
+    fun `los puntos de muestra de una zona quedan dentro del radio`() {
+        val finder = MeetingPointFinder(FakePlaces(emptyList()), FakeMatrix())
+        val c = LatLng(-34.61, -58.44)
+        val samples = finder.zoneSamplePoints(c, 9_000.0)
+        assertEquals(13, samples.size)
+        assertTrue(samples.all { Geo.distanceMeters(c, it) <= 6_001 })
+        assertTrue(samples.drop(7).all { Geo.distanceMeters(c, it) > 5_900 })
+    }
+
+    @Test
     fun `cumplir el tope sin auto pesa mas que ser parejo`() {
         val friends = listOf(
             Participant("auto", "Auto", at(0.00), TravelMode.DRIVE),
